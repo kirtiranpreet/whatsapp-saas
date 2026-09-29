@@ -122,6 +122,17 @@ async function run(args: Args, ctx: ToolContext): Promise<ToolResult> {
     await supabase.from("waitlist_entries").update({ hl_tagged: true }).eq("id", entryId);
   }
 
+  // Google Sheet, best-effort: an Apps Script web app bound to the sheet
+  // appends the row (tool config: sheet_webhook_url + sheet_webhook_token).
+  await appendToSheet(supabase, ctx.workspaceId, {
+    city,
+    name,
+    phone,
+    email,
+    notes,
+    updated: Boolean(existing),
+  });
+
   return {
     ok: true,
     output: {
@@ -130,6 +141,49 @@ async function run(args: Args, ctx: ToolContext): Promise<ToolResult> {
       message: `Apuntado en la lista de espera de ${city}. Confírmaselo y dile que le avisaréis en cuanto haya una edición en su ciudad.`,
     },
   };
+}
+
+async function appendToSheet(
+  supabase: ReturnType<typeof svc>,
+  workspaceId: string,
+  row: {
+    city: string;
+    name: string | null;
+    phone: string | null;
+    email: string | null;
+    notes: string;
+    updated: boolean;
+  },
+): Promise<void> {
+  try {
+    const { data } = await supabase
+      .from("tool_configs")
+      .select("config, tools!inner(key)")
+      .eq("workspace_id", workspaceId)
+      .eq("tools.key", "join_waitlist")
+      .maybeSingle();
+    const config = (data?.config ?? {}) as { sheet_webhook_url?: unknown; sheet_webhook_token?: unknown };
+    const url = typeof config.sheet_webhook_url === "string" ? config.sheet_webhook_url : "";
+    if (!url.startsWith("https://script.google.com/")) return;
+    const res = await fetch(url, {
+      method: "POST",
+      signal: AbortSignal.timeout(10_000),
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        token: typeof config.sheet_webhook_token === "string" ? config.sheet_webhook_token : "",
+        fecha: new Date().toLocaleString("es-ES", { timeZone: "Europe/Madrid" }),
+        ciudad: row.city,
+        nombre: row.name ?? "",
+        telefono: row.phone ?? "",
+        email: row.email ?? "",
+        notas: row.notes,
+        estado: row.updated ? "En espera (actualizado)" : "En espera",
+      }),
+    });
+    if (!res.ok) console.error("[join_waitlist] sheet append failed:", res.status);
+  } catch (err) {
+    console.error("[join_waitlist] sheet append error:", err instanceof Error ? err.message : String(err));
+  }
 }
 
 export const joinWaitlistTool: Tool<Args> = {
