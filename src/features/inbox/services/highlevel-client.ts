@@ -288,7 +288,7 @@ export async function upsertHLContactByPhone(
  * POST /contacts/upsert REPLACE the whole list, which would wipe the tags
  * HighLevel's own workflows set. Best-effort: a failure is logged.
  */
-async function addHLTags(cfg: HLConfig, hlContactId: string, tags: string[]): Promise<void> {
+export async function addHLTags(cfg: HLConfig, hlContactId: string, tags: string[]): Promise<void> {
   if (tags.length === 0) return;
   try {
     const res = await fetch(`${HL_BASE_URL}/contacts/${hlContactId}/tags`, {

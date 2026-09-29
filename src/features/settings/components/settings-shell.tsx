@@ -10,6 +10,7 @@ import { AutomationsTab } from "./automations-tab";
 import { N8nToolsTab } from "./n8n-tools-tab";
 import { KbTab } from "./kb-tab";
 import { FilesTab } from "./files-tab";
+import { WaitlistTab } from "./waitlist-tab";
 import { AgentsTab } from "@/features/agents/components/agents-tab";
 import type { AgentDto } from "@/features/agents/types";
 import type { JevSettings } from "@/features/jev-judge/components/jev-panel";
@@ -72,6 +73,7 @@ export function SettingsShell({
             <TabsTrigger value="templates">Templates</TabsTrigger>
             <TabsTrigger value="knowledge-base">Knowledge Base</TabsTrigger>
             <TabsTrigger value="archivos">Archivos</TabsTrigger>
+            <TabsTrigger value="lista-espera">Lista de espera</TabsTrigger>
             <TabsTrigger value="equipo">Equipo</TabsTrigger>
             <TabsTrigger value="automatizaciones">Automatizaciones</TabsTrigger>
           </TabsList>
@@ -142,6 +144,15 @@ export function SettingsShell({
         <TabsContent value="archivos">
           <div className="p-6 space-y-6 rounded-lg border border-border/60 bg-card">
             <FilesTab
+              workspaceId={workspaceId}
+              canManage={role === "admin" || role === "manager"}
+            />
+          </div>
+        </TabsContent>
+
+        <TabsContent value="lista-espera">
+          <div className="p-6 space-y-6 rounded-lg border border-border/60 bg-card">
+            <WaitlistTab
               workspaceId={workspaceId}
               canManage={role === "admin" || role === "manager"}
             />

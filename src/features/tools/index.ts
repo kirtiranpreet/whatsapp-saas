@@ -8,6 +8,7 @@ import { listHighLevelAppointmentsTool } from "./tools/list-highlevel-appointmen
 import { checkAvailabilityTool } from "./tools/check-availability";
 import { handoffHumanTool } from "./tools/handoff-human";
 import { sendFileTool } from "./tools/send-file";
+import { joinWaitlistTool } from "./tools/join-waitlist";
 
 registry.register(echoTool);
 registry.register(scheduleLinkTool);
@@ -18,6 +19,7 @@ registry.register(listHighLevelAppointmentsTool);
 registry.register(checkAvailabilityTool);
 registry.register(handoffHumanTool);
 registry.register(sendFileTool);
+registry.register(joinWaitlistTool);
 
 export { registry };
 export type {
