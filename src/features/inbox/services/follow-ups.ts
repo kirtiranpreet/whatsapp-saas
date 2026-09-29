@@ -135,12 +135,12 @@ async function scheduleForConversation(
     .select("direction, sender_user_id, meta, created_at")
     .eq("workspace_id", workspaceId)
     .eq("conversation_id", conversationId)
-    .not("meta", "cs", JSON.stringify({ internal: true }))
     .order("created_at", { ascending: false })
-    .limit(1);
-  const last = lastRows?.[0] as
-    | { direction: string; sender_user_id: string | null; meta: Record<string, unknown> | null; created_at: string }
-    | undefined;
+    .limit(10);
+  // Internal notes don't count (filtered here: a `not cs` filter would also
+  // drop rows whose meta is null).
+  type Row = { direction: string; sender_user_id: string | null; meta: Record<string, unknown> | null; created_at: string };
+  const last = ((lastRows ?? []) as Row[]).find((m) => m.meta?.internal !== true);
   if (!last || !isAgentMessage(last)) return false;
 
   const { data: inRows } = await supabase
