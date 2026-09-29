@@ -34,7 +34,8 @@ const securityHeaders = [
       "script-src 'self' 'unsafe-eval' 'unsafe-inline'",
       "style-src 'self' 'unsafe-inline'",
       "img-src 'self' data: blob: *.supabase.co",
-      "media-src 'self' blob: *.supabase.co",
+      // storage.googleapis.com: ElevenLabs voice previews (agent settings).
+      "media-src 'self' blob: *.supabase.co storage.googleapis.com",
       "font-src 'self' data:",
       `connect-src ${connectSrc}`,
       "frame-ancestors 'none'",

@@ -7,6 +7,17 @@ import {
 } from "@/shared/lib/db-errors";
 import { dispatchText, dispatchTemplate, dispatchMedia } from "./dispatch";
 import {
+  MAX_SPECIAL_VOICE_NOTES,
+  MAX_SPOKEN_CHARS,
+  SPECIAL_VOICE_NOTE_CONTEXT,
+  elevenLabsApiKey,
+  shouldReplyWithVoice,
+  splitSpokenReply,
+  voiceReplyOf,
+} from "@/features/voice/elevenlabs";
+import { dispatchVoiceReply } from "@/features/voice/voice-reply";
+import { replyWithVoiceTool } from "@/features/voice/voice-note-tool";
+import {
   formatAgentFilesContext,
   getAgentFile,
   listAgentFiles,
@@ -412,7 +423,12 @@ export async function reconcileOrphanedMessages(
 async function consolidateBatch(
   batch: MessageBatch,
   supabase: ReturnType<typeof svc>,
-): Promise<{ text: string; lastMessageAt: string | undefined }> {
+): Promise<{
+  text: string;
+  lastMessageAt: string | undefined;
+  /** The customer sent a voice note in this batch. */
+  hasAudio: boolean;
+}> {
   const { data: msgs, error } = await supabase
     .from("messages")
     .select("id, body, meta, type, created_at")
@@ -464,7 +480,11 @@ async function consolidateBatch(
     }
   });
 
-  return { text: lines.join("\n"), lastMessageAt: rows.at(-1)?.created_at };
+  return {
+    text: lines.join("\n"),
+    lastMessageAt: rows.at(-1)?.created_at,
+    hasAudio: rows.some((msg) => msg.type === "audio" || (msg.type as string) === "voice"),
+  };
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -925,6 +945,13 @@ export async function processNextBatch(): Promise<ProcessBatchResult> {
         listKbSourceLinks(batch.workspace_id),
       ]);
 
+    // Voice replies (ElevenLabs): the agent's setting, only with a key set.
+    const voice = elevenLabsApiKey() ? voiceReplyOf(activeAgent?.config) : null;
+    // In "special" mode the agent picks the moment with reply_with_voice, a
+    // few times per conversation: past that cap it isn't offered.
+    const offerVoiceTool =
+      voice?.mode === "special" &&
+      (await countVoiceReplies(supabase, batch)) < MAX_SPECIAL_VOICE_NOTES;
     // The files the agent may send, listed only when send_file is on.
     const agentFiles = (decisionResult.availableTools ?? []).some(
       (t) => t.name === "send_file",
@@ -941,6 +968,7 @@ export async function processNextBatch(): Promise<ProcessBatchResult> {
       formatKbContext(kbResults),
       formatKbReferenceLinks(kbLinks),
       formatAgentFilesContext(agentFiles),
+      offerVoiceTool ? SPECIAL_VOICE_NOTE_CONTEXT : "",
     ]
       .filter(Boolean)
       .join("\n\n");
@@ -1002,7 +1030,9 @@ export async function processNextBatch(): Promise<ProcessBatchResult> {
       model,
       userMessage: mergedText,
       workspaceId: batch.workspace_id,
-      availableTools: decisionResult.availableTools,
+      availableTools: offerVoiceTool
+        ? [...(decisionResult.availableTools ?? []), replyWithVoiceTool]
+        : decisionResult.availableTools,
       toolContext: toolCtx,
       history,
       // A write is on record BEFORE it runs, so neither a failed turn, a
@@ -1025,6 +1055,14 @@ export async function processNextBatch(): Promise<ProcessBatchResult> {
       // Then its outcome. A write the tool itself reported as failed changed
       // nothing, so it no longer counts; otherwise it stays counted.
       onToolExecuted: async (execution) => {
+        // reply_with_voice: this turn's reply goes out as a voice note.
+        if (execution.name === "reply_with_voice" && execution.ok === true) {
+          if (batch.meta.voice_requested !== true) {
+            batch.meta = { ...batch.meta, voice_requested: true };
+            await saveBatchMeta(supabase, batch);
+          }
+          return;
+        }
         // send_file asked for a file: it goes out after the reply
         // (deliverReply), kept in the batch so a retry still sends it.
         if (execution.name === "send_file" && execution.ok === true) {
@@ -1145,10 +1183,19 @@ export async function processNextBatch(): Promise<ProcessBatchResult> {
     // sent unless saved: a reply sent without its checkpoint could be
     // generated — and sent — again. A handoff the agent asked for travels
     // with it, so a retry hands off too.
+    // Whether it goes out as a voice note is decided now and kept with it,
+    // so a retry sends it the same way.
+    const replyVoiceId = shouldReplyWithVoice(voice, {
+      customerSentAudio: consolidated.hasAudio,
+      agentAsked: batch.meta.voice_requested === true,
+    })
+      ? voice?.voiceId
+      : undefined;
     batch.meta = {
       ...batch.meta,
       pending_reply: reply.text,
       ...(handoffReason ? { pending_handoff: handoffReason } : {}),
+      ...(replyVoiceId ? { reply_voice: replyVoiceId } : {}),
     };
     await saveBatchMeta(supabase, batch, { required: true });
 
@@ -1333,6 +1380,67 @@ export async function processNextBatch(): Promise<ProcessBatchResult> {
   }
 }
 
+/** Voice notes the agent already sent in this conversation. */
+async function countVoiceReplies(
+  supabase: ReturnType<typeof svc>,
+  batch: MessageBatch,
+): Promise<number> {
+  const { count, error } = await supabase
+    .from("messages")
+    .select("id", { count: "exact", head: true })
+    .eq("workspace_id", batch.workspace_id)
+    .eq("conversation_id", batch.conversation_id)
+    .eq("direction", "out")
+    .contains("meta", { voice_reply: true });
+  if (error) {
+    // Unknown: don't offer more voice notes than the cap allows.
+    console.error("[buffer] voice reply count failed:", error.message);
+    return MAX_SPECIAL_VOICE_NOTES;
+  }
+  return count ?? 0;
+}
+
+/**
+ * Sends the reply as a voice note when this turn decided so (reply_voice),
+ * with its links as text right after. Returns null to send it as text
+ * instead: no voice asked, nothing left to say out loud, a reply too long for
+ * a voice note, or an audio that couldn't be made.
+ */
+async function deliverVoiceReply(
+  batch: MessageBatch,
+  text: string,
+): Promise<Awaited<ReturnType<typeof dispatchText>> | null> {
+  const voiceId = batch.meta.reply_voice;
+  if (typeof voiceId !== "string" || !voiceId) return null;
+
+  const { spoken, links } = splitSpokenReply(text);
+  if (!spoken || spoken.length > MAX_SPOKEN_CHARS) return null;
+
+  const result = await dispatchVoiceReply({
+    workspaceId: batch.workspace_id,
+    conversationId: batch.conversation_id,
+    batchId: batch.id,
+    spoken,
+    voiceId,
+    meta: { batch_id: batch.id },
+  });
+  if (!result) return null;
+
+  if (result.ok && links.length > 0) {
+    const linkResult = await dispatchText({
+      workspaceId: batch.workspace_id,
+      conversationId: batch.conversation_id,
+      body: links.join("\n"),
+      noteWhenBlocked: true,
+      meta: { batch_id: batch.id, voice_links: true },
+    });
+    if (!linkResult.ok) {
+      console.error("[buffer] links after the voice note not sent:", linkResult.errorCode);
+    }
+  }
+  return result;
+}
+
 /** Files the agent asked to send this turn with send_file, in order. */
 function pendingFilesOf(meta: Record<string, unknown>): string[] {
   return Array.isArray(meta.pending_files)
@@ -1445,17 +1553,21 @@ async function deliverReply(
   }
 
   // ── Dispatch via single exit point (SEC-04) ──
-  const dispatchResult = await dispatchText({
-    workspaceId: batch.workspace_id,
-    conversationId: batch.conversation_id,
-    body: text,
-    // AI-generated: no senderUserId
-    recordRetryableFailure: isLastAttempt,
-    // A reply blocked by the 24h window or an opt-out stays visible.
-    noteWhenBlocked: true,
-    // Lets a retry see that this batch's reply already left.
-    meta: { batch_id: batch.id },
-  });
+  // A voice note when this turn asked for one; the text if the audio can't be
+  // made, so the contact always gets an answer.
+  const dispatchResult =
+    (await deliverVoiceReply(batch, text)) ??
+    (await dispatchText({
+      workspaceId: batch.workspace_id,
+      conversationId: batch.conversation_id,
+      body: text,
+      // AI-generated: no senderUserId
+      recordRetryableFailure: isLastAttempt,
+      // A reply blocked by the 24h window or an opt-out stays visible.
+      noteWhenBlocked: true,
+      // Lets a retry see that this batch's reply already left.
+      meta: { batch_id: batch.id },
+    }));
 
   if (!dispatchResult.ok) {
     if (dispatchResult.retryable && !isLastAttempt) {

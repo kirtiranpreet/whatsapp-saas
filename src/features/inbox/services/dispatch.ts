@@ -562,6 +562,11 @@ export interface DispatchMediaParams {
   filename: string;
   sizeBytes?: number;
   caption?: string;
+  /**
+   * The message's text in the thread and in the agent's history (a voice
+   * note's words). Defaults to the caption.
+   */
+  body?: string;
   /** null = sent by the AI agent, set = human agent */
   senderUserId?: string;
   /** Extra keys for the outbound row's meta. */
@@ -612,7 +617,7 @@ export async function dispatchMedia(
     conversation_id: conversationId,
     direction: "out",
     type: kind,
-    body: params.caption ?? null,
+    body: params.body ?? params.caption ?? null,
     sender_user_id: params.senderUserId ?? null,
     meta: rowMeta,
   });

@@ -22,6 +22,7 @@ import { AgentAvatar } from "./agent-avatar";
 import { GuidedPromptEditor } from "./guided-prompt-editor";
 import { TestChatPanel } from "./test-chat-panel";
 import { SetterAdvancedConfig } from "./setter-advanced-config";
+import { VoiceReplyPicker, type VoiceSetting } from "./voice-reply-picker";
 import { AGENT_TYPE_META } from "@/features/agents/lib/agent-meta";
 import { cn } from "@/lib/utils";
 import type { AgentDto } from "@/features/agents/types";
@@ -62,6 +63,14 @@ export function AgentConfigSheet({
   const [sleepOnManual, setSleepOnManual] = useState(
     agent.config.sleepOnManualMessage !== false,
   );
+  const [voiceReply, setVoiceReply] = useState<VoiceSetting>(() => {
+    const raw = agent.config.voiceReply as Partial<VoiceSetting> | undefined;
+    return {
+      mode: raw?.mode ?? "off",
+      voiceId: raw?.voiceId ?? "",
+      voiceName: raw?.voiceName,
+    };
+  });
   const [saving, setSaving] = useState(false);
   const router = useRouter();
 
@@ -86,6 +95,7 @@ export function AgentConfigSheet({
             summarize,
             responseStyle,
             sleepOnManualMessage: sleepOnManual,
+            voiceReply,
           },
         }),
       });
@@ -203,6 +213,12 @@ export function AgentConfigSheet({
                 />
               </div>
             </div>
+
+            <VoiceReplyPicker
+              workspaceId={workspaceId}
+              value={voiceReply}
+              onChange={setVoiceReply}
+            />
 
             <div className="space-y-2">
               <Label>Estilo de respuesta</Label>
