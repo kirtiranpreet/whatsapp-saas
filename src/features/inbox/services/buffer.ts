@@ -5,7 +5,12 @@ import {
   isMissingFunctionError,
   reportMissingFunctionOnce,
 } from "@/shared/lib/db-errors";
-import { dispatchText, dispatchTemplate } from "./dispatch";
+import { dispatchText, dispatchTemplate, dispatchMedia } from "./dispatch";
+import {
+  formatAgentFilesContext,
+  getAgentFile,
+  listAgentFiles,
+} from "@/features/agent-files/service";
 import { UNCONFIRMED_SEND_ERROR } from "./whatsapp-errors";
 import { decide, applyTransition } from "./decision-engine";
 import {
@@ -684,6 +689,8 @@ export async function processNextBatch(): Promise<ProcessBatchResult> {
       retryCount > 0 || pendingReply ? await settleEarlierSend(supabase, batch) : null;
     if (earlierSend) {
       progress.replySent = true;
+      // The worker died after the reply: its files may still be owed.
+      if (earlierSend.delivered) await sendPendingFiles(supabase, batch);
       // The worker that sent the reply died before handing off (or the
       // handoff failed and was re-queued): do it now. A reply known to have
       // gone out needs no generic acknowledgement.
@@ -918,9 +925,22 @@ export async function processNextBatch(): Promise<ProcessBatchResult> {
         listKbSourceLinks(batch.workspace_id),
       ]);
 
+    // The files the agent may send, listed only when send_file is on.
+    const agentFiles = (decisionResult.availableTools ?? []).some(
+      (t) => t.name === "send_file",
+    )
+      ? await listAgentFiles(supabase, batch.workspace_id).catch((err: unknown) => {
+          console.warn("[buffer] agent files list failed, answering without it:", {
+            batchId: batch.id,
+            error: err instanceof Error ? err.message : String(err),
+          });
+          return [];
+        })
+      : [];
     const kbContext = [
       formatKbContext(kbResults),
       formatKbReferenceLinks(kbLinks),
+      formatAgentFilesContext(agentFiles),
     ]
       .filter(Boolean)
       .join("\n\n");
@@ -1005,6 +1025,17 @@ export async function processNextBatch(): Promise<ProcessBatchResult> {
       // Then its outcome. A write the tool itself reported as failed changed
       // nothing, so it no longer counts; otherwise it stays counted.
       onToolExecuted: async (execution) => {
+        // send_file asked for a file: it goes out after the reply
+        // (deliverReply), kept in the batch so a retry still sends it.
+        if (execution.name === "send_file" && execution.ok === true) {
+          const fileId = (execution.output as { file_id?: unknown } | null)?.file_id;
+          const current = pendingFilesOf(batch.meta);
+          if (typeof fileId === "string" && !current.includes(fileId)) {
+            batch.meta = { ...batch.meta, pending_files: [...current, fileId] };
+            await saveBatchMeta(supabase, batch);
+          }
+          return;
+        }
         // handoff_human asked for a person: keep that even if the turn fails
         // before its farewell goes out.
         if (execution.name === "handoff_human" && execution.ok === true) {
@@ -1302,6 +1333,74 @@ export async function processNextBatch(): Promise<ProcessBatchResult> {
   }
 }
 
+/** Files the agent asked to send this turn with send_file, in order. */
+function pendingFilesOf(meta: Record<string, unknown>): string[] {
+  return Array.isArray(meta.pending_files)
+    ? (meta.pending_files as unknown[]).filter((v): v is string => typeof v === "string")
+    : [];
+}
+
+/** At most this many files follow one reply, whatever the model asked. */
+const MAX_FILES_PER_REPLY = 3;
+
+/**
+ * Sends the files send_file asked for, after the reply. Each is sent at most
+ * once per conversation: a file already sent there (by this batch's earlier
+ * attempt, or a past turn) is skipped, so a retry never repeats it. Never
+ * throws — a file that fails is logged and leaves the reply as it was.
+ */
+async function sendPendingFiles(
+  supabase: ReturnType<typeof svc>,
+  batch: MessageBatch,
+): Promise<void> {
+  const fileIds = pendingFilesOf(batch.meta).slice(0, MAX_FILES_PER_REPLY);
+  for (const fileId of fileIds) {
+    try {
+      const { data: already, error: lookupError } = await supabase
+        .from("messages")
+        .select("id")
+        .eq("workspace_id", batch.workspace_id)
+        .eq("conversation_id", batch.conversation_id)
+        .eq("direction", "out")
+        .contains("meta", { agent_file_id: fileId })
+        .limit(1);
+      if (lookupError) {
+        // Unknown whether it went out: not sending beats sending twice.
+        console.error("[buffer] agent file lookup failed:", lookupError.message);
+        continue;
+      }
+      if ((already ?? []).length > 0) continue;
+
+      const file = await getAgentFile(supabase, batch.workspace_id, fileId);
+      if (!file) continue;
+
+      const result = await dispatchMedia({
+        workspaceId: batch.workspace_id,
+        conversationId: batch.conversation_id,
+        kind: file.kind,
+        storagePath: file.storage_path,
+        mimeType: file.mime_type,
+        filename: file.filename,
+        sizeBytes: file.size_bytes,
+        meta: { agent_file_id: file.id, media_batch_id: batch.id },
+      });
+      if (!result.ok) {
+        console.error("[buffer] agent file not sent:", {
+          batchId: batch.id,
+          fileId,
+          errorCode: result.errorCode,
+        });
+      }
+    } catch (err) {
+      console.error("[buffer] agent file send failed:", {
+        batchId: batch.id,
+        fileId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+}
+
 /**
  * Sends `text` as the AI reply for `batch` and closes the batch. Returns
  * "skipped" when nothing was sent on purpose (a person took the conversation
@@ -1371,6 +1470,9 @@ async function deliverReply(
   }
 
   progress.replySent = true;
+  // Files the agent asked for (send_file) follow the reply that presents
+  // them — only if it went out. Never throws.
+  if (dispatchResult.ok) await sendPendingFiles(supabase, batch);
   // A person was asked for: hand off now that the reply was sent (tool:, no
   // generic acknowledgement) or definitively wasn't (tool_unsent:, the
   // contact gets the acknowledgement). Before closing the batch, so a worker

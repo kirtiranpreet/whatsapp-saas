@@ -29,7 +29,8 @@ import {
   type WhatsAppSender,
 } from "./whatsapp-sender";
 import { YCloudError } from "./ycloud-client";
-import { KapsoError } from "./kapso-client";
+import { KapsoError, type OutboundMediaKind } from "./kapso-client";
+import { getSignedUrl } from "./media-handler";
 import {
   parseWhatsAppError,
   formatErrorForLog,
@@ -540,6 +541,129 @@ export async function dispatchText(
     send: () => sender.sendText(toPhone, body),
     what: "sendText",
     recordRetryableFailure,
+  });
+
+  if (result.ok) await touchConversation(supabase, conversationId);
+  return result;
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// dispatchMedia — sends a stored file (document, audio, video, image)
+// ──────────────────────────────────────────────────────────────────────────────
+
+export interface DispatchMediaParams {
+  workspaceId: string;
+  conversationId: string;
+  kind: OutboundMediaKind;
+  /** Path in the whatsapp-media bucket: {workspace_id}/{id}/{name}. */
+  storagePath: string;
+  mimeType: string;
+  /** Shown to the contact for documents. */
+  filename: string;
+  sizeBytes?: number;
+  caption?: string;
+  /** null = sent by the AI agent, set = human agent */
+  senderUserId?: string;
+  /** Extra keys for the outbound row's meta. */
+  meta?: Record<string, unknown>;
+}
+
+/**
+ * Sends a file from storage. Same order as dispatchText: opt-out and 24 h
+ * window checks, the row queued first (the 24 h trigger fires on it), then
+ * the provider call. The row keeps storage_path/mime_type, so the inbox shows
+ * the attachment like an inbound one.
+ */
+export async function dispatchMedia(
+  params: DispatchMediaParams,
+): Promise<DispatchResult> {
+  const { workspaceId, conversationId, kind, storagePath, mimeType, filename } =
+    params;
+
+  // The file must belong to this workspace: its first path segment is the
+  // workspace id (service role — no RLS here).
+  if (storagePath.split("/")[0] !== workspaceId) return NOT_FOUND;
+
+  const supabase = svc();
+
+  const loaded = await loadConversationAndPhone(conversationId, workspaceId, supabase);
+  if (!loaded) return NOT_FOUND;
+  if (!loaded.optIn) return OPT_OUT;
+  if (
+    loaded.window_expires_at !== null &&
+    new Date() > new Date(loaded.window_expires_at)
+  ) {
+    return WINDOW_EXPIRED;
+  }
+
+  const sender = await loadSender(workspaceId, supabase);
+  const rowMeta: Record<string, unknown> = {
+    ...(params.meta ?? {}),
+    storage_path: storagePath,
+    mime_type: mimeType,
+    filename,
+    size_bytes: params.sizeBytes,
+    caption: params.caption,
+    dev_mode: sender.live ? undefined : true,
+  };
+
+  const queued = await insertQueuedRow(supabase, {
+    workspace_id: workspaceId,
+    conversation_id: conversationId,
+    direction: "out",
+    type: kind,
+    body: params.caption ?? null,
+    sender_user_id: params.senderUserId ?? null,
+    meta: rowMeta,
+  });
+  if ("error" in queued) {
+    console.error("[dispatch] media insert error:", queued.error);
+    if (queued.error.includes("WINDOW_EXPIRED")) return WINDOW_EXPIRED;
+    return {
+      ok: false,
+      error: GENERIC_SEND_ERROR,
+      errorCode: "DB_ERROR",
+      retryable: true,
+    };
+  }
+
+  if (!sender.live) {
+    await touchConversation(supabase, conversationId);
+    return { ok: true };
+  }
+
+  // WhatsApp downloads the file from this link, so it must outlive the send
+  // (1 h). Without it nothing can be sent: the row is marked failed.
+  const link = await getSignedUrl(storagePath);
+  if (!link) {
+    await supabase
+      .from("messages")
+      .update({ status: "failed", error_message: "No se encontró el archivo para enviarlo." })
+      .eq("id", queued.id)
+      .eq("workspace_id", workspaceId);
+    return {
+      ok: false,
+      error: "No se encontró el archivo para enviarlo.",
+      errorCode: "SEND_FAILED",
+    };
+  }
+
+  const result = await sendQueuedRow({
+    supabase,
+    sender,
+    workspaceId,
+    rowId: queued.id,
+    rowMeta,
+    send: () =>
+      sender.sendMedia({
+        to: loaded.toPhone,
+        kind,
+        link,
+        filename,
+        caption: params.caption,
+      }),
+    what: "sendMedia",
+    recordRetryableFailure: true,
   });
 
   if (result.ok) await touchConversation(supabase, conversationId);

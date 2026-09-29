@@ -27,6 +27,14 @@ export interface WhatsAppSender {
   /** False for a missing/"placeholder" key: dev mode, nothing is sent. */
   live: boolean;
   sendText(to: string, body: string): Promise<SendResult>;
+  /** A document, audio, video or image that WhatsApp downloads from `link`. */
+  sendMedia(params: {
+    to: string;
+    kind: kapso.OutboundMediaKind;
+    link: string;
+    filename?: string;
+    caption?: string;
+  }): Promise<SendResult>;
   sendTemplate(params: {
     to: string;
     templateName: string;
@@ -86,6 +94,18 @@ export function whatsappSender(
         });
         return { wamid: sent.wamid || undefined };
       },
+      async sendMedia({ to, kind, link, filename, caption }) {
+        const sent = await kapso.sendMedia({
+          apiKey,
+          phoneNumberId: phoneNumberId(),
+          to,
+          kind,
+          link,
+          filename,
+          caption,
+        });
+        return { wamid: sent.wamid || undefined };
+      },
       async sendTemplate({ to, templateName, language, components }) {
         const sent = await kapso.sendTemplate({
           apiKey,
@@ -108,6 +128,21 @@ export function whatsappSender(
     live,
     async sendText(to, body) {
       const sent = await ycloud.sendText({ apiKey, from: from(), to, body });
+      return {
+        wamid: sent.wamid || undefined,
+        providerMessageId: sent.id || undefined,
+      };
+    },
+    async sendMedia({ to, kind, link, filename, caption }) {
+      const sent = await ycloud.sendMedia({
+        apiKey,
+        from: from(),
+        to,
+        kind,
+        link,
+        filename,
+        caption,
+      });
       return {
         wamid: sent.wamid || undefined,
         providerMessageId: sent.id || undefined,

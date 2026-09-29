@@ -1,3 +1,4 @@
+import { mediaPayload, type OutboundMediaKind } from "./kapso-client";
 import type { MetaTemplateComponent } from "@/features/settings/lib/template-form";
 import { matchesOwnNumber, normalizePhone, placePhone } from "./phone";
 
@@ -80,6 +81,63 @@ export async function sendText(
 
   const data = responseBody as Record<string, unknown>;
 
+  return {
+    id: typeof data.id === "string" ? data.id : "",
+    wamid: typeof data.wamid === "string" ? data.wamid : "",
+    status: typeof data.status === "string" ? data.status : "accepted",
+  };
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// sendMedia
+// ──────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Sends a document, audio, video or image by link via the YCloud API (same
+ * media object shape as Meta's). Throws YCloudError on non-2xx responses.
+ */
+export async function sendMedia(params: {
+  apiKey: string;
+  from: string;
+  to: string;
+  kind: OutboundMediaKind;
+  link: string;
+  filename?: string;
+  caption?: string;
+}): Promise<SendTextResult> {
+  const { apiKey, from, to, kind } = params;
+
+  const response = await fetch(YCLOUD_MESSAGES_URL, {
+    method: "POST",
+    signal: AbortSignal.timeout(SEND_TIMEOUT_MS),
+    headers: {
+      "Content-Type": "application/json",
+      "X-API-Key": apiKey,
+    },
+    body: JSON.stringify({
+      type: kind,
+      from,
+      to,
+      [kind]: mediaPayload(params),
+    }),
+  });
+
+  let responseBody: unknown;
+  try {
+    responseBody = await response.json();
+  } catch {
+    responseBody = null;
+  }
+
+  if (!response.ok) {
+    throw new YCloudError(
+      response.status,
+      responseBody,
+      `YCloud API error ${response.status}`,
+    );
+  }
+
+  const data = responseBody as Record<string, unknown>;
   return {
     id: typeof data.id === "string" ? data.id : "",
     wamid: typeof data.wamid === "string" ? data.wamid : "",

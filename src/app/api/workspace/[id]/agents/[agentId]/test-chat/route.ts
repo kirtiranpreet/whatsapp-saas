@@ -25,6 +25,10 @@ import {
 } from "@/features/inbox/services/business-info";
 import { workspaceSchedulingTimeZone } from "@/features/inbox/services/scheduling-timezone";
 import { getEnabledTools } from "@/features/tools/services/tool-configs";
+import {
+  formatAgentFilesContext,
+  listAgentFiles,
+} from "@/features/agent-files/service";
 import type { AgentConfig } from "@/features/agents/types";
 import { isCatalogModel } from "@/features/agents/lib/model-catalog";
 import { guardWorkspaceLlmCall } from "@/features/inbox/services/llm-call-guard";
@@ -182,9 +186,17 @@ export async function POST(
     searchKb(workspaceId, lastUserMessage, 3),
     listKbSourceLinks(workspaceId),
   ]);
+  // The files the agent may send, listed only when send_file is on — as in
+  // buffer.ts.
+  // A failure here is retried below, inside the try that reports it.
+  const enabledTools = await getEnabledTools(workspaceId).catch(() => null);
+  const agentFiles = (enabledTools ?? []).some((t) => t.name === "send_file")
+    ? await listAgentFiles(svc(), workspaceId).catch(() => [])
+    : [];
   const kbContext = [
     formatKbContext(kbResults),
     formatKbReferenceLinks(kbLinks),
+    formatAgentFilesContext(agentFiles),
   ]
     .filter(Boolean)
     .join("\n\n");
@@ -214,7 +226,7 @@ export async function POST(
     // membership read above, never from the request. The seed gives every
     // call of this request the same idempotency key base, and
     // generateChatReply doesn't retry a turn after a write.
-    const enabled = await getEnabledTools(workspaceId);
+    const enabled = enabledTools ?? (await getEnabledTools(workspaceId));
     const tools = role === "admin" ? enabled : enabled.filter((t) => t.sensitivity === "read");
     const reply = await generateChatReply({
       model,

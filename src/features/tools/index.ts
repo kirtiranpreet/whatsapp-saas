@@ -7,6 +7,7 @@ import { rescheduleHighLevelTool } from "./tools/reschedule-highlevel";
 import { listHighLevelAppointmentsTool } from "./tools/list-highlevel-appointments";
 import { checkAvailabilityTool } from "./tools/check-availability";
 import { handoffHumanTool } from "./tools/handoff-human";
+import { sendFileTool } from "./tools/send-file";
 
 registry.register(echoTool);
 registry.register(scheduleLinkTool);
@@ -16,6 +17,7 @@ registry.register(rescheduleHighLevelTool);
 registry.register(listHighLevelAppointmentsTool);
 registry.register(checkAvailabilityTool);
 registry.register(handoffHumanTool);
+registry.register(sendFileTool);
 
 export { registry };
 export type {

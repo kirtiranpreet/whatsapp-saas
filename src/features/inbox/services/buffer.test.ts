@@ -296,6 +296,7 @@ mock.module("./dispatch.ts", {
       return dispatchResult;
     },
     dispatchTemplate: async () => ({ ok: true }),
+    dispatchMedia: async () => ({ ok: true }),
   },
 });
 

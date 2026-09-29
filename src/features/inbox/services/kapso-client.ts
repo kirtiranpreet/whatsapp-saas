@@ -144,6 +144,65 @@ export async function sendText(
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
+// sendMedia
+// ──────────────────────────────────────────────────────────────────────────────
+
+export type OutboundMediaKind = "document" | "audio" | "video" | "image";
+
+interface SendMediaParams {
+  apiKey: string;
+  /** Meta phone number ID */
+  phoneNumberId: string;
+  to: string;
+  kind: OutboundMediaKind;
+  /** Public HTTPS URL WhatsApp downloads the file from (a signed URL works). */
+  link: string;
+  /** Shown to the contact for documents. */
+  filename?: string;
+  /** Documents, images and videos only: WhatsApp ignores it on audio. */
+  caption?: string;
+}
+
+/** The media object of a Meta send body for one kind. */
+export function mediaPayload(params: {
+  kind: OutboundMediaKind;
+  link: string;
+  filename?: string;
+  caption?: string;
+}): Record<string, string> {
+  const media: Record<string, string> = { link: params.link };
+  if (params.kind === "document" && params.filename) media.filename = params.filename;
+  if (params.kind !== "audio" && params.caption) media.caption = params.caption;
+  return media;
+}
+
+/**
+ * Sends a document, audio, video or image by link via the Kapso WhatsApp API.
+ * Throws KapsoError on non-2xx responses.
+ */
+export async function sendMedia(params: SendMediaParams): Promise<SendTextResult> {
+  const { apiKey, phoneNumberId, to, kind } = params;
+
+  const data = await kapsoFetch(
+    `${KAPSO_WA_BASE}/${encodeURIComponent(phoneNumberId)}/messages`,
+    apiKey,
+    {
+      method: "POST",
+      body: JSON.stringify({
+        messaging_product: "whatsapp",
+        to,
+        type: kind,
+        [kind]: mediaPayload(params),
+      }),
+    },
+    "sendMedia",
+  );
+
+  const wamid = wamidFromSendResponse(data);
+  return { id: wamid, wamid, status: "accepted" };
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
 // sendTemplate
 // ──────────────────────────────────────────────────────────────────────────────
 
