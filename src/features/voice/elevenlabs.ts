@@ -21,8 +21,11 @@ export const ELEVENLABS_MODEL = "eleven_multilingual_v2";
  */
 export type VoiceReplyMode = "off" | "special" | "on_audio" | "always";
 
-/** En modo "special", las notas de voz que el agente puede mandar por conversación. */
-export const MAX_SPECIAL_VOICE_NOTES = 2;
+/**
+ * En modo "special", las notas de voz que el agente puede mandar por
+ * conversación: una sola, guardada para el momento que más confianza genera.
+ */
+export const MAX_SPECIAL_VOICE_NOTES = 1;
 
 export interface VoiceReplyConfig {
   mode: VoiceReplyMode;
@@ -76,12 +79,14 @@ export function shouldReplyWithVoice(
 export const SPECIAL_VOICE_NOTE_CONTEXT = [
   "## Notas de voz",
   "Puedes enviar tu respuesta como nota de voz, con tu voz, llamando a la herramienta reply_with_voice " +
-    "antes de escribir la respuesta. Úsala solo en momentos especiales en los que escuchar una voz genere " +
-    "más cercanía y confianza, por ejemplo: cuando el cliente te manda una nota de voz, cuando expresa dudas, " +
-    "miedo o desconfianza, o cuando le invitas a la llamada o cita. No la uses para respuestas de trámite, " +
-    `datos o listas, y como mucho ${MAX_SPECIAL_VOICE_NOTES} veces por conversación.`,
-  "Cuando la uses, escribe la respuesta como la dirías hablando: frases cortas y naturales, sin listas, " +
-    "sin emojis ni formato. Si incluyes un enlace, se enviará por escrito aparte, justo después del audio.",
+    "antes de escribir la respuesta. Tienes una sola nota de voz en toda la conversación: guárdala para el " +
+    "momento en que escuchar una voz genere más confianza (si tus instrucciones dicen cuándo usarla, síguelas). " +
+    "Por ejemplo: el cliente desapareció después de recibir la información, expresa dudas, miedo o " +
+    "desconfianza, o duda justo antes de agendar. No la uses para respuestas de trámite, datos, listas ni " +
+    "precios. Cuando ya la hayas usado, esta herramienta deja de estar disponible.",
+  "Cuando la uses, escribe la respuesta como la dirías hablando, de 50 a 90 palabras (20-35 segundos): " +
+    "frases cortas y naturales, sin listas, sin emojis ni formato. Si incluyes un enlace, se enviará por " +
+    "escrito aparte, justo después del audio.",
 ].join("\n");
 
 const URL_RE = /https?:\/\/[^\s)>\]]+/g;

@@ -17,10 +17,10 @@ export const replyWithVoiceTool: Tool<Args> = {
   sensitivity: "read",
   description:
     "Hace que tu próxima respuesta se envíe como nota de voz, con tu voz, en vez de " +
-    "por escrito. Úsala solo en momentos especiales que ganan con una voz (el cliente " +
-    "te mandó un audio, expresa dudas o desconfianza, o le invitas a la llamada), " +
-    "nunca para datos o listas. Llámala antes de escribir tu respuesta y luego escribe " +
-    "la respuesta como la dirías hablando.",
+    "por escrito. Solo tienes una en toda la conversación: úsala en el momento que más " +
+    "confianza genera (el cliente desapareció tras recibir la información, expresa dudas " +
+    "o desconfianza, o duda antes de agendar), nunca para datos, listas o precios. " +
+    "Llámala antes de escribir tu respuesta y luego escribe la respuesta como la dirías hablando.",
   schema,
   enabledFor: () => true,
   run: async () => ({
@@ -28,7 +28,7 @@ export const replyWithVoiceTool: Tool<Args> = {
     output: {
       voice_note: true,
       message:
-        "Tu respuesta se enviará como nota de voz. Escríbela como la dirías hablando: corta, natural, sin listas ni emojis.",
+        "Tu respuesta se enviará como nota de voz. Escríbela como la dirías hablando: 50-90 palabras, natural, sin listas ni emojis.",
     },
   }),
 };

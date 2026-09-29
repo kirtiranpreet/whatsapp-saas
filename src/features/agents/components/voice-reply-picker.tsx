@@ -23,7 +23,7 @@ interface Voice {
 
 const MODE_OPTIONS: { value: VoiceMode; label: string; hint: string }[] = [
   { value: "off", label: "Nunca", hint: "Solo texto" },
-  { value: "special", label: "En momentos especiales", hint: "El agente decide, máx. 2" },
+  { value: "special", label: "En momentos especiales", hint: "Una por conversación, cuando más confianza genera" },
   { value: "on_audio", label: "Si el cliente manda audio", hint: "Responde igual" },
   { value: "always", label: "Siempre", hint: "Todas las respuestas" },
 ];
