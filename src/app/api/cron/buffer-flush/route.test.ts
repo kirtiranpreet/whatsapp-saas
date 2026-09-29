@@ -20,6 +20,10 @@ mock.module("@/features/inbox/services/buffer.ts", {
   },
 });
 
+mock.module("@/features/inbox/services/follow-ups.ts", {
+  exports: { scheduleFollowUps: async () => 1 },
+});
+
 const { GET, maxDuration } = await import("./route.ts");
 
 function req(auth?: string) {
@@ -49,7 +53,7 @@ test("runs the drain with the right bearer", async () => {
   processCalls.length = 0;
   const res = await GET(req("Bearer s3cret"));
   assert.equal(res.status, 200);
-  assert.deepEqual(await res.json(), { ok: true, processed: 0, recovered: 2 });
+  assert.deepEqual(await res.json(), { ok: true, processed: 0, recovered: 2, followUps: 1 });
   assert.equal(processCalls.length, 1);
 });
 

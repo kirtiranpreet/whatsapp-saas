@@ -71,6 +71,9 @@ export function AgentConfigSheet({
       voiceName: raw?.voiceName,
     };
   });
+  const [followUpsOn, setFollowUpsOn] = useState(
+    (agent.config.followUps as { enabled?: boolean } | undefined)?.enabled === true,
+  );
   const [saving, setSaving] = useState(false);
   const router = useRouter();
 
@@ -96,6 +99,10 @@ export function AgentConfigSheet({
             responseStyle,
             sleepOnManualMessage: sleepOnManual,
             voiceReply,
+            followUps: {
+              ...((agent.config.followUps as Record<string, unknown> | undefined) ?? {}),
+              enabled: followUpsOn,
+            },
           },
         }),
       });
@@ -219,6 +226,25 @@ export function AgentConfigSheet({
               value={voiceReply}
               onChange={setVoiceReply}
             />
+
+            <div className="flex items-center justify-between gap-3 rounded-lg border p-3">
+              <div>
+                <p className="text-sm font-medium text-foreground">
+                  Seguimientos automáticos
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  Si el cliente deja de responder, el agente le escribe hasta 3
+                  veces en 24 h (a la hora, a las 5 h y el último a las ~22 h),
+                  nunca de 22:00 a 9:00 (hora de España). Los escribe según sus
+                  instrucciones y se detienen en cuanto responde.
+                </p>
+              </div>
+              <Switch
+                checked={followUpsOn}
+                onCheckedChange={setFollowUpsOn}
+                aria-label="Seguimientos automáticos"
+              />
+            </div>
 
             <div className="space-y-2">
               <Label>Estilo de respuesta</Label>

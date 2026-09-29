@@ -15,6 +15,12 @@ import {
   splitSpokenReply,
   voiceReplyOf,
 } from "@/features/voice/elevenlabs";
+import {
+  customerWroteSince,
+  followUpInstruction,
+  followUpOf,
+  isNoSendReply,
+} from "./follow-ups";
 import { dispatchVoiceReply } from "@/features/voice/voice-reply";
 import { replyWithVoiceTool } from "@/features/voice/voice-note-tool";
 import {
@@ -684,6 +690,15 @@ export async function processNextBatch(): Promise<ProcessBatchResult> {
     // ── 3. Consolidate messages into one string ──────────────────────────────
     const consolidated = await consolidateBatch(batch, supabase);
     mergedText = consolidated.text;
+    // A follow-up (follow-ups.ts) has no customer message: the agent gets an
+    // instruction to write the follow-up instead.
+    const followUp = followUpOf(batch.meta);
+    if (followUp) {
+      mergedText = followUpInstruction(
+        followUp.step,
+        (Date.now() - Date.parse(followUp.after)) / 3_600_000,
+      );
+    }
 
     // ── 4. Load conversation record ─────────────────────────────────────────
     const { data: conversation, error: convError } = await supabase
@@ -695,6 +710,23 @@ export async function processNextBatch(): Promise<ProcessBatchResult> {
 
     if (convError || !conversation) {
       throw new Error(`${CONVERSATION_NOT_FOUND}: ${convError?.message}`);
+    }
+
+    // The customer wrote after the follow-up was scheduled (their message
+    // gets its own turn), or the AI was switched off: it no longer applies.
+    if (
+      followUp &&
+      typeof batch.meta.pending_reply !== "string" &&
+      (!conversation.ai_enabled ||
+        (await customerWroteSince(
+          supabase,
+          batch.workspace_id,
+          batch.conversation_id,
+          followUp.after,
+        )))
+    ) {
+      await markBatchProcessed(batch, mergedText, supabase);
+      return done();
     }
 
     // ── 5. What an earlier attempt left behind ─────────────────────────────
@@ -807,7 +839,8 @@ export async function processNextBatch(): Promise<ProcessBatchResult> {
     const decisionResult = await decide({
       workspaceId: batch.workspace_id,
       conversationId: batch.conversation_id,
-      mergedText,
+      // A follow-up's instruction is ours, never a handoff keyword.
+      mergedText: followUp ? "" : mergedText,
       contactId: conversation.contact_id as string,
       reservationId: priorReservationId,
     });
@@ -835,7 +868,10 @@ export async function processNextBatch(): Promise<ProcessBatchResult> {
     // retry reuses it instead of judging again.
     // A failure falls through to the existing reply. It never downgrades customer.
     const cachedJev = batch.meta.jev_verdict;
-    const jev: JevBatchEffect = isJevVerdict(cachedJev)
+    // A follow-up has no customer message for Jev to judge.
+    const jev: JevBatchEffect = followUp
+      ? { suppressReply: false, ownsStage: false }
+      : isJevVerdict(cachedJev)
       ? cachedJev
       : await applyJevToBatch(
           supabase,
@@ -935,7 +971,10 @@ export async function processNextBatch(): Promise<ProcessBatchResult> {
         getBusinessInfo(batch.workspace_id),
         // The KB is context, not the turn: a slow or failing search (its
         // embedding times out at 15 s) answers without it.
-        searchKb(batch.workspace_id, mergedText, 3).catch((err: unknown) => {
+        (followUp
+          ? Promise.resolve([] as Awaited<ReturnType<typeof searchKb>>)
+          : searchKb(batch.workspace_id, mergedText, 3)
+        ).catch((err: unknown) => {
           console.warn("[buffer] KB search failed, answering without it:", {
             batchId: batch.id,
             error: err instanceof Error ? err.message : String(err),
@@ -1154,6 +1193,15 @@ export async function processNextBatch(): Promise<ProcessBatchResult> {
     const handoffReason =
       findHandoffReason(reply.toolResults) ?? pendingHandoffOf(batch.meta);
 
+    // The agent decided this follow-up makes no sense (already booked, asked
+    // to stop): nothing is sent and the sequence ends.
+    if (followUp && !handoffReason && writeRuns.length === 0 && isNoSendReply(reply.text)) {
+      batch.meta = { ...batch.meta, follow_up_skipped: true };
+      await saveBatchMeta(supabase, batch);
+      await markBatchProcessed(batch, mergedText, supabase);
+      return done();
+    }
+
     if (!reply.text.trim()) {
       // A person was asked for but there's no reply: hand off right away,
       // and the contact gets the generic acknowledgement instead.
@@ -1234,7 +1282,7 @@ export async function processNextBatch(): Promise<ProcessBatchResult> {
     // runs even if the serverless function is frozen right after the batch. It is
     // fully try/catched internally and never throws into the batch path. Dormant
     // unless an enabled setter_config exists for the workspace.
-    if (!jev.ownsStage && activeAgent?.type === "setter") {
+    if (!followUp && !jev.ownsStage && activeAgent?.type === "setter") {
       await runSetterEvaluation({
         workspaceId: batch.workspace_id,
         conversationId: batch.conversation_id,
@@ -1314,6 +1362,28 @@ export async function processNextBatch(): Promise<ProcessBatchResult> {
         // Fall through: the re-queued batch keeps write_tools_ran, and the
         // next attempt hands off before running anything.
       }
+    }
+
+    // ── 10d0. A follow-up that failed is dropped, never retried nor
+    // dead-lettered: a late follow-up is worse than none, and a failure must
+    // not hand the conversation to a person.
+    if (followUpOf(batch.meta)) {
+      await supabase
+        .from("message_batches")
+        .update({
+          status: "cancelled",
+          updated_at: new Date().toISOString(),
+          meta: { ...batch.meta, last_error: errorMsg, cancelled_reason: "follow_up_failed" },
+        })
+        .eq("id", batch.id)
+        .eq("workspace_id", batch.workspace_id)
+        .eq("status", "processing");
+      return {
+        processed: false,
+        conversationId: batch.conversation_id,
+        batchId: batch.id,
+        error: errorMsg,
+      };
     }
 
     // ── 10d. Dead-letter: out of retries ────────────────────────────────────
@@ -1548,6 +1618,17 @@ async function deliverReply(
       batchId: batch.id,
       state: liveConv.state,
     });
+    await markBatchProcessed(batch, mergedText, supabase);
+    return "skipped";
+  }
+
+  // A follow-up whose customer wrote meanwhile: that message gets its own
+  // turn; this one would talk over it.
+  const followUp = followUpOf(batch.meta);
+  if (
+    followUp &&
+    (await customerWroteSince(supabase, batch.workspace_id, batch.conversation_id, followUp.after))
+  ) {
     await markBatchProcessed(batch, mergedText, supabase);
     return "skipped";
   }

@@ -5,6 +5,7 @@ import {
   processNextBatch,
   reconcileOrphanedMessages,
 } from "@/features/inbox/services/buffer";
+import { scheduleFollowUps } from "@/features/inbox/services/follow-ups";
 
 // ──────────────────────────────────────────────────────────────────────────────
 // Buffer drain — called every minute by pg_cron (job `buffer-flush`, see
@@ -43,6 +44,10 @@ export async function GET(request: Request): Promise<NextResponse> {
   // without a batch get one now.
   const recovered = await reconcileOrphanedMessages();
 
+  // Follow-ups due now become batches, drained below like any other turn.
+  // Never throws: a failure here can't hold up the normal replies.
+  const followUps = await scheduleFollowUps();
+
   const results: Array<{ processed: boolean; error?: string }> = [];
 
   // Never claim a batch without time to finish it: a function killed mid-turn
@@ -62,5 +67,5 @@ export async function GET(request: Request): Promise<NextResponse> {
 
   const processedCount = results.filter((r) => r.processed).length;
 
-  return NextResponse.json({ ok: true, processed: processedCount, recovered });
+  return NextResponse.json({ ok: true, processed: processedCount, recovered, followUps });
 }
