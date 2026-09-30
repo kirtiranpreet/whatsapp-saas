@@ -41,3 +41,15 @@ test("a manager's dropped connection, or a failure with no write, adds nothing t
     assert.equal(added[0].error, true);
   }
 });
+
+test("historyToSend keeps only the latest turns, starting with the user", async () => {
+  const { historyToSend, MAX_HISTORY_TURNS } = await import("./playground-history.ts");
+  const long = Array.from({ length: 31 }, (_, i) => ({
+    role: (i % 2 === 0 ? "user" : "assistant") as "user" | "assistant",
+    content: `m${i}`,
+  }));
+  const sent = historyToSend(long);
+  assert.ok(sent.length <= MAX_HISTORY_TURNS);
+  assert.equal(sent[0].role, "user");
+  assert.equal(sent.at(-1)?.content, "m30");
+});

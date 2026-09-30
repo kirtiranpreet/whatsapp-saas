@@ -20,11 +20,27 @@ export const WROTE_NOTE =
 export const MAYBE_WROTE_NOTE =
   "[Sistema: el turno anterior pudo haber ejecutado una acción antes de perderse la conexión; no la repitas sin confirmarlo]";
 
-/** The history the server gets: every turn but the error bubbles. */
+/** What test-chat accepts in one request (its schema): turns and characters. */
+export const MAX_HISTORY_TURNS = 20;
+export const MAX_HISTORY_CHARS = 38_000;
+
+/**
+ * The history the server gets: every turn but the error bubbles — the most
+ * recent ones only, like the agent's real window on WhatsApp, so a long test
+ * never goes over what test-chat accepts. It always starts with a user turn.
+ */
 export function historyToSend(
   messages: PlaygroundMsg[],
 ): Array<{ role: "user" | "assistant"; content: string }> {
-  return messages.filter((m) => !m.error).map(({ role, content }) => ({ role, content }));
+  let out = messages
+    .filter((m) => !m.error)
+    .map(({ role, content }) => ({ role, content }))
+    .slice(-MAX_HISTORY_TURNS);
+  const size = () => out.reduce((n, m) => n + m.content.length, 0);
+  while (out.length > 1 && (size() > MAX_HISTORY_CHARS || out[0].role !== "user")) {
+    out = out.slice(1);
+  }
+  return out;
 }
 
 /**
