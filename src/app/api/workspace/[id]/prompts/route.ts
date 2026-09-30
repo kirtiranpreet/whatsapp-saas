@@ -29,7 +29,7 @@ const CreateVersionSchema = z.object({
   promptName: z.string().min(1).max(200),
   scope: z.enum(ALLOWED_SCOPES),
   scopeRef: z.string().max(200).optional(),
-  body: z.string().min(1).max(50_000),
+  body: z.string().min(1).max(100_000),
   variables: z.array(z.unknown()).optional(),
   guardrails: GuardrailsSchema,
 });

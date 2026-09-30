@@ -54,7 +54,7 @@ const Schema = z.object({
     )
     .min(1)
     .max(20),
-  draftPromptBody: z.string().max(50_000).optional(),
+  draftPromptBody: z.string().max(100_000).optional(),
   // Only the curated catalog: the playground spends the workspace's key.
   modelOverride: z
     .string()
