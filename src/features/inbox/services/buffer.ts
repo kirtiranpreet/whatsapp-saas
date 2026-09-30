@@ -702,7 +702,7 @@ export async function processNextBatch(): Promise<ProcessBatchResult> {
     }
     // A booking notice (api/webhooks/booking): the agent confirms the call.
     const booking = followUp ? null : bookingOf(batch.meta);
-    if (booking) mergedText = bookingInstruction(booking.when);
+    if (booking) mergedText = bookingInstruction(booking.when, booking.calendar ?? null);
     // Turns we started (no customer message): no Jev, KB, handoff keywords
     // nor setter scoring, and a failure is dropped instead of retried.
     const systemTurn = Boolean(followUp || booking);

@@ -89,6 +89,8 @@ export interface BookingMeta {
   start: string | null;
   when: string | null;
   appointment_id: string | null;
+  /** El calendario en que reservó: decide qué texto usa el agente. */
+  calendar?: string | null;
 }
 
 export function bookingOf(meta: Record<string, unknown> | null | undefined): BookingMeta | null {
@@ -98,14 +100,17 @@ export function bookingOf(meta: Record<string, unknown> | null | undefined): Boo
     start: typeof b.start === "string" ? b.start : null,
     when: typeof b.when === "string" ? b.when : null,
     appointment_id: typeof b.appointment_id === "string" ? b.appointment_id : null,
+    calendar: typeof b.calendar === "string" ? b.calendar : null,
   };
 }
 
 /** Lo que el agente recibe en lugar de un mensaje del cliente. */
-export function bookingInstruction(when: string | null): string {
+export function bookingInstruction(when: string | null, calendar: string | null = null): string {
   return (
     `[AVISO DEL SISTEMA — esto no lo ha escrito el cliente. ` +
-    `El cliente acaba de reservar la llamada con Antonio${when ? ` para el ${when}` : ""}. ` +
+    `El cliente acaba de reservar la llamada con Antonio${when ? ` para el ${when}` : ""}` +
+    `${calendar ? ` en el calendario "${calendar}"` : ""}. ` +
+    `${calendar ? "Usa los textos de después de reservar que corresponden a ese calendario. " : ""}` +
     `Escríbele ahora siguiendo tus instrucciones para después de reservar: confírmale la llamada` +
     `${when ? " con el día y la hora" : ""}, dale las indicaciones para prepararla y envíale lo que tus instrucciones digan que se envía al reservar. ` +
     `No vuelvas a ofrecerle la agenda.]`

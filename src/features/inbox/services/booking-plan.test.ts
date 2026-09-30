@@ -46,7 +46,12 @@ test("meta and instruction", () => {
     start: "s",
     when: "w",
     appointment_id: null,
+    calendar: null,
   });
+  assert.match(
+    bookingInstruction("jueves", "Llamada – Sesión individual de Hipnosis"),
+    /en el calendario "Llamada – Sesión individual de Hipnosis"/,
+  );
   assert.equal(bookingOf({}), null);
   assert.match(bookingInstruction("jueves 1 de octubre a las 10:00"), /para el jueves 1 de octubre/);
 });

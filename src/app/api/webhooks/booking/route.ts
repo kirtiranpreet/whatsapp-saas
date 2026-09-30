@@ -112,6 +112,7 @@ export async function POST(req: NextRequest) {
     start: notice.start,
     when: describeStart(notice.start, notice.timeZone),
     appointment_id: notice.appointmentId,
+    calendar: notice.calendar,
   };
 
   // Recorded even when the agent won't write (a person owns the thread): it
