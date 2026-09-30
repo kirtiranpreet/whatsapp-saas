@@ -21,6 +21,7 @@ import {
   followUpOf,
   isNoSendReply,
 } from "./follow-ups";
+import { bookingInstruction, bookingOf } from "./booking-plan";
 import { dispatchVoiceReply } from "@/features/voice/voice-reply";
 import { replyWithVoiceTool } from "@/features/voice/voice-note-tool";
 import {
@@ -699,6 +700,12 @@ export async function processNextBatch(): Promise<ProcessBatchResult> {
         (Date.now() - Date.parse(followUp.after)) / 3_600_000,
       );
     }
+    // A booking notice (api/webhooks/booking): the agent confirms the call.
+    const booking = followUp ? null : bookingOf(batch.meta);
+    if (booking) mergedText = bookingInstruction(booking.when);
+    // Turns we started (no customer message): no Jev, KB, handoff keywords
+    // nor setter scoring, and a failure is dropped instead of retried.
+    const systemTurn = Boolean(followUp || booking);
 
     // ── 4. Load conversation record ─────────────────────────────────────────
     const { data: conversation, error: convError } = await supabase
@@ -840,7 +847,7 @@ export async function processNextBatch(): Promise<ProcessBatchResult> {
       workspaceId: batch.workspace_id,
       conversationId: batch.conversation_id,
       // A follow-up's instruction is ours, never a handoff keyword.
-      mergedText: followUp ? "" : mergedText,
+      mergedText: systemTurn ? "" : mergedText,
       contactId: conversation.contact_id as string,
       reservationId: priorReservationId,
     });
@@ -869,7 +876,7 @@ export async function processNextBatch(): Promise<ProcessBatchResult> {
     // A failure falls through to the existing reply. It never downgrades customer.
     const cachedJev = batch.meta.jev_verdict;
     // A follow-up has no customer message for Jev to judge.
-    const jev: JevBatchEffect = followUp
+    const jev: JevBatchEffect = systemTurn
       ? { suppressReply: false, ownsStage: false }
       : isJevVerdict(cachedJev)
       ? cachedJev
@@ -971,7 +978,7 @@ export async function processNextBatch(): Promise<ProcessBatchResult> {
         getBusinessInfo(batch.workspace_id),
         // The KB is context, not the turn: a slow or failing search (its
         // embedding times out at 15 s) answers without it.
-        (followUp
+        (systemTurn
           ? Promise.resolve([] as Awaited<ReturnType<typeof searchKb>>)
           : searchKb(batch.workspace_id, mergedText, 3)
         ).catch((err: unknown) => {
@@ -1282,7 +1289,7 @@ export async function processNextBatch(): Promise<ProcessBatchResult> {
     // runs even if the serverless function is frozen right after the batch. It is
     // fully try/catched internally and never throws into the batch path. Dormant
     // unless an enabled setter_config exists for the workspace.
-    if (!followUp && !jev.ownsStage && activeAgent?.type === "setter") {
+    if (!systemTurn && !jev.ownsStage && activeAgent?.type === "setter") {
       await runSetterEvaluation({
         workspaceId: batch.workspace_id,
         conversationId: batch.conversation_id,
@@ -1367,13 +1374,17 @@ export async function processNextBatch(): Promise<ProcessBatchResult> {
     // ── 10d0. A follow-up that failed is dropped, never retried nor
     // dead-lettered: a late follow-up is worse than none, and a failure must
     // not hand the conversation to a person.
-    if (followUpOf(batch.meta)) {
+    if (followUpOf(batch.meta) || bookingOf(batch.meta)) {
       await supabase
         .from("message_batches")
         .update({
           status: "cancelled",
           updated_at: new Date().toISOString(),
-          meta: { ...batch.meta, last_error: errorMsg, cancelled_reason: "follow_up_failed" },
+          meta: {
+            ...batch.meta,
+            last_error: errorMsg,
+            cancelled_reason: followUpOf(batch.meta) ? "follow_up_failed" : "booking_turn_failed",
+          },
         })
         .eq("id", batch.id)
         .eq("workspace_id", batch.workspace_id)

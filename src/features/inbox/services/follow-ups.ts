@@ -154,6 +154,16 @@ async function scheduleForConversation(
   const lastInbound = inRows?.[0]?.created_at as string | undefined;
   if (!lastInbound) return false;
 
+  // Booked the call (api/webhooks/booking): no more follow-ups, ever.
+  const { data: booked } = await supabase
+    .from("message_batches")
+    .select("id")
+    .eq("workspace_id", workspaceId)
+    .eq("conversation_id", conversationId)
+    .contains("meta", { booking: {} })
+    .limit(1);
+  if ((booked ?? []).length > 0) return false;
+
   // Anything unfinished for this conversation goes first.
   const { data: open } = await supabase
     .from("message_batches")
