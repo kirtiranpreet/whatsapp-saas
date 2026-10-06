@@ -490,3 +490,34 @@ export async function getMediaUrl(
         : null,
   };
 }
+
+// ──────────────────────────────────────────────────────────────────────────────
+// sendTypingIndicator — "escribiendo…" while the agent writes
+// ──────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Marks the contact's message as read and shows "escribiendo…" in their chat
+ * until the reply arrives (WhatsApp drops it after ~25 s). WhatsApp only offers
+ * the text indicator: there is no "grabando audio".
+ */
+export async function sendTypingIndicator(params: {
+  apiKey: string;
+  phoneNumberId: string;
+  /** wamid of the contact's latest message */
+  messageId: string;
+}): Promise<void> {
+  await kapsoFetch(
+    `${KAPSO_WA_BASE}/${encodeURIComponent(params.phoneNumberId)}/messages`,
+    params.apiKey,
+    {
+      method: "POST",
+      body: JSON.stringify({
+        messaging_product: "whatsapp",
+        status: "read",
+        message_id: params.messageId,
+        typing_indicator: { type: "text" },
+      }),
+    },
+    "sendTypingIndicator",
+  );
+}

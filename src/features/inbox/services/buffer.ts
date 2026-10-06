@@ -1076,6 +1076,15 @@ export async function processNextBatch(): Promise<ProcessBatchResult> {
         "agent_turn",
       ));
 
+    // "escribiendo…" in the contact's chat while the reply is generated
+    // (not for turns we start ourselves: follow-ups, booking notices).
+    if (!systemTurn) {
+      const dispatchMod = await import("./dispatch");
+      if (typeof dispatchMod.showTypingIndicator === "function") {
+        void dispatchMod.showTypingIndicator(batch.workspace_id, batch.conversation_id);
+      }
+    }
+
     const reply = await generateWithTools({
       systemPrompt: finalSystemPrompt,
       model,

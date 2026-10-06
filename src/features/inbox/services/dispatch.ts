@@ -758,3 +758,47 @@ export async function dispatchTemplate(
   if (result.ok) await touchConversation(supabase, conversationId);
   return result;
 }
+
+/**
+ * Shows "escribiendo…" in the contact's chat while the agent writes (Kapso
+ * only, and only where config.typing_indicator is on). Best effort: it never
+ * delays or breaks the reply, it just logs a failure.
+ */
+export async function showTypingIndicator(
+  workspaceId: string,
+  conversationId: string,
+): Promise<void> {
+  try {
+    const supabase = svc();
+    const row = await loadWhatsAppIntegration(supabase, workspaceId);
+    if (!row || row.provider !== "kapso") return;
+    if ((row.config as { typing_indicator?: unknown }).typing_indicator !== true) return;
+    const phoneNumberId = row.config.phone_number_id;
+    if (typeof phoneNumberId !== "string" || !phoneNumberId) return;
+
+    const { data: last } = await supabase
+      .from("messages")
+      .select("wamid")
+      .eq("workspace_id", workspaceId)
+      .eq("conversation_id", conversationId)
+      .eq("direction", "in")
+      .not("wamid", "is", null)
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    const messageId = (last as { wamid?: string } | null)?.wamid;
+    if (!messageId) return;
+
+    const credentials = await decryptWhatsAppCredentials(row, workspaceId);
+    const apiKey = credentials.kapso_api_key;
+    if (typeof apiKey !== "string" || !apiKey || apiKey === "placeholder") return;
+
+    const { sendTypingIndicator } = await import("./kapso-client");
+    await sendTypingIndicator({ apiKey, phoneNumberId, messageId });
+  } catch (err) {
+    console.warn(
+      "[dispatch] typing indicator failed:",
+      err instanceof Error ? err.message : "unknown",
+    );
+  }
+}
