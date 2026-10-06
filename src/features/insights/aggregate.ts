@@ -15,10 +15,59 @@ import {
   type VerifiedExtraction,
 } from "./schema";
 
+export interface ConversationMetrics {
+  messages: number;
+  customer_messages: number;
+  agent_messages: number;
+  duration_hours: number;
+  had_follow_up: boolean;
+}
+
 export interface AnalyzedConversation {
   conversationId: string;
   contactLabel: string;
   extraction: VerifiedExtraction;
+  metrics: ConversationMetrics;
+}
+
+/** Resultado que cuenta como conversión para este agente (venta o llamada agendada). */
+export const CONVERTED = new Set(["compro", "agendo_llamada"]);
+const NOT_CONVERTED = new Set(["rechazo", "no_compro"]);
+export const MIN_SAMPLE = 10;
+
+export interface GroupProfile {
+  n: number;
+  sufficient: boolean;
+  median_messages: number | null;
+  median_customer_messages: number | null;
+  median_questions: number | null;
+  median_objections: number | null;
+  median_duration_hours: number | null;
+  pct_with_follow_up: number;
+  pct_with_objection: number;
+}
+
+export function median(values: number[]): number | null {
+  if (values.length === 0) return null;
+  const s = [...values].sort((a, b) => a - b);
+  const mid = Math.floor(s.length / 2);
+  const m = s.length % 2 ? s[mid] : (s[mid - 1] + s[mid]) / 2;
+  return Math.round(m * 10) / 10;
+}
+
+function profile(items: AnalyzedConversation[]): GroupProfile {
+  const n = items.length;
+  return {
+    n,
+    sufficient: n >= MIN_SAMPLE,
+    median_messages: median(items.map((i) => i.metrics.messages)),
+    median_customer_messages: median(items.map((i) => i.metrics.customer_messages)),
+    median_questions: median(items.map((i) => i.extraction.questions.length)),
+    median_objections: median(items.map((i) => i.extraction.objections.length)),
+    median_duration_hours: median(items.map((i) => i.metrics.duration_hours)),
+    pct_with_follow_up: percent(items.filter((i) => i.metrics.had_follow_up).length, n),
+    pct_with_objection: percent(items.filter((i) => i.extraction.objections.length > 0).length, n),
+  };
 }
 
 export interface Example extends Evidence {
@@ -46,6 +95,7 @@ export interface ReportStats {
   topics: CountRow[];
   language: Array<{ theme: string; count: number; quotes: Example[] }>;
   funnel: Array<{ stage: string; reached: number; percent: number }>;
+  conversion: { converted: GroupProfile; not_converted: GroupProfile; excluded: number };
   conversations: Array<{
     conversation_id: string;
     contact: string;
@@ -232,6 +282,13 @@ export function aggregate(
       reached: funnelReached.get(stage) ?? 0,
       percent: percent(funnelReached.get(stage) ?? 0, base),
     })),
+    conversion: {
+      converted: profile(items.filter((i) => CONVERTED.has(i.extraction.outcome.status))),
+      not_converted: profile(items.filter((i) => NOT_CONVERTED.has(i.extraction.outcome.status))),
+      excluded: items.filter(
+        (i) => !CONVERTED.has(i.extraction.outcome.status) && !NOT_CONVERTED.has(i.extraction.outcome.status),
+      ).length,
+    },
     conversations: items.map((i) => ({
       conversation_id: i.conversationId,
       contact: i.contactLabel,

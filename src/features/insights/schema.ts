@@ -206,7 +206,9 @@ export const RecommendationResponseSchema = z.object({
       z.object({
         type: z.enum(RECOMMENDATION_TYPES),
         title: shortText(140),
-        detail: shortText(700),
+        problem: shortText(500),
+        action: shortText(700),
+        impact: shortText(300),
         based_on: z.array(z.string()).min(1),
       }),
     )
@@ -231,6 +233,12 @@ export const ContentResponseSchema = z.object({
   }),
   email: z.object({ subject: shortText(140), body: shortText(3000) }),
   whatsapp_reply: shortText(1200),
+  masterclass: z.object({
+    title: shortText(140),
+    promise: shortText(300),
+    outline: z.array(shortText(240)).min(3).max(8),
+  }),
+  faq: z.object({ question: shortText(240), answer: shortText(1200) }),
 });
 
 export type ContentPack = z.infer<typeof ContentResponseSchema>;
