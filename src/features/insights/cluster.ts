@@ -7,6 +7,7 @@
 import { callJson } from "./llm";
 import { ClusterResponseSchema } from "./schema";
 import type { LabelMap } from "./aggregate";
+import { toLabelMap } from "./group-map";
 
 const key = (s: string) => s.trim().toLocaleLowerCase("es");
 
@@ -16,23 +17,6 @@ Reglas:
 - No inventes etiquetas ni dejes ninguna fuera.
 - Une solo lo que es realmente la misma intención; si dudas, deja grupos separados.
 - "name": nombre claro en español, corto (puede ser una de las etiquetas).`;
-
-/** Valida una agrupación: devuelve el mapa o null si no cubre todas las etiquetas. */
-export function toLabelMap(
-  labels: string[],
-  groups: { name: string; members: string[] }[],
-): LabelMap | null {
-  const wanted = new Set(labels.map(key));
-  const map: LabelMap = new Map();
-  for (const g of groups) {
-    for (const m of g.members) {
-      const k = key(m);
-      if (!wanted.has(k) || map.has(k)) return null;
-      map.set(k, g.name.trim());
-    }
-  }
-  return map.size === wanted.size ? map : null;
-}
 
 export async function clusterLabels(params: {
   workspaceId: string;

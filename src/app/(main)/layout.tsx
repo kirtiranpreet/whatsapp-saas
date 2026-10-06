@@ -12,6 +12,7 @@ import { cn } from "@/lib/utils";
 import {
   Building2,
   LayoutDashboard,
+  Lightbulb,
   LogOut,
   MessageCircle,
   Settings,
@@ -117,6 +118,17 @@ export default async function MainLayout({
             </Button>
           </Link>
 
+          <Link href="/insights">
+            <Button
+              variant="ghost"
+              size="sm"
+              className="text-muted-foreground hover:text-foreground"
+            >
+              <Lightbulb className="h-4 w-4" aria-hidden="true" />
+              <span className="sr-only sm:not-sr-only sm:ml-2">Inteligencia</span>
+            </Button>
+          </Link>
+
           <Link href="/dashboard">
             <Button
               variant="ghost"
@@ -170,6 +182,14 @@ export default async function MainLayout({
         >
           <MessageCircle className="h-5 w-5" aria-hidden="true" />
           <span>Inbox</span>
+        </Link>
+
+        <Link
+          href="/insights"
+          className="flex flex-col items-center gap-0.5 text-xs text-muted-foreground hover:text-primary transition-colors"
+        >
+          <Lightbulb className="h-5 w-5" aria-hidden="true" />
+          <span>Inteligencia</span>
         </Link>
 
         <Link

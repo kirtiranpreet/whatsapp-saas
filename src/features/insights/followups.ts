@@ -66,7 +66,7 @@ export interface FollowUpItem {
 
 /** Expresiones de compra observables. Se busca en el texto del cliente. */
 const SIGNAL_PATTERNS: Array<{ signal: string; re: RegExp }> = [
-  { signal: "Pregunta cómo pagar", re: /\b(c[oó]mo (lo )?pago|c[oó]mo (se )?paga|forma(s)? de pago|m[eé]todo(s)? de pago|transferencia|bizum|tarjeta|paypal|pagar en (cuotas|plazos))\b/i },
+  { signal: "Pregunta cómo pagar", re: /\b(c[oó]mo (lo )?pago|c[oó]mo (puedo|podr[ií]a|se puede|hago para) pagar|d[oó]nde (pago|se paga)|c[oó]mo (se )?paga|forma(s)? de pago|m[eé]todo(s)? de pago|transferencia|bizum|tarjeta|paypal|pagar en (cuotas|plazos))\b/i },
   { signal: "Pide el enlace", re: /\b(p[aá]same|me (pasas|mandas|env[ií]as)|env[ií]ame|manda(me)?)\b.{0,20}\b(enlace|link)\b|\b(el|un) (enlace|link) (de|para) (pago|inscripci[oó]n|reservar)\b/i },
   { signal: "Pregunta fechas o disponibilidad", re: /\b(qu[eé] fechas?|cu[aá]ndo (es|empieza|empezamos|comienza|ser[ií]a|podr[ií]a empezar)|hay plazas?|quedan plazas?|disponibilidad|pr[oó]xima (edici[oó]n|fecha))\b/i },
   { signal: "Pregunta qué incluye o condiciones", re: /\b(qu[eé] incluye|qu[eé] trae|condiciones|garant[ií]a|devoluci[oó]n|certificado)\b/i },

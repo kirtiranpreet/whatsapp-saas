@@ -11,9 +11,8 @@ import {
   OBJECTION_KINDS,
   OUTCOMES,
   SENTIMENTS,
-  type Evidence,
-  type VerifiedExtraction,
-} from "./schema";
+} from "./constants";
+import type { Evidence, VerifiedExtraction } from "./schema";
 
 export interface ConversationMetrics {
   messages: number;
