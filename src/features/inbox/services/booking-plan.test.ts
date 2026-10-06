@@ -55,3 +55,24 @@ test("meta and instruction", () => {
   assert.equal(bookingOf({}), null);
   assert.match(bookingInstruction("jueves 1 de octubre a las 10:00"), /para el jueves 1 de octubre/);
 });
+
+test("GHL wall-clock start in the booker's zone becomes the right Spain time", () => {
+  // Booked from Montevideo at 06:20 local = 11:20 in Madrid (CEST).
+  assert.equal(
+    describeStart("2026-10-07T06:20:00", "America/Montevideo"),
+    "miércoles, 7 de octubre a las 11:20 (hora de España); para la persona, que está en otra zona horaria (America/Montevideo), son las 06:20",
+  );
+  assert.equal(
+    describeStart("2026-10-07T11:20:00", "Europe/Madrid"),
+    "miércoles, 7 de octubre a las 11:20 (hora de España)",
+  );
+  assert.equal(
+    describeStart("2026-10-07T11:20:00+02:00", "America/Montevideo").startsWith("miércoles, 7 de octubre a las 11:20 (hora de España)"),
+    true,
+  );
+  // Winter time in Madrid (CET, UTC+1).
+  assert.equal(
+    describeStart("2026-11-10T10:00:00", "Europe/Madrid"),
+    "martes, 10 de noviembre a las 10:00 (hora de España)",
+  );
+});

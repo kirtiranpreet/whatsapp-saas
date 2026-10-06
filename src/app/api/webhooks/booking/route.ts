@@ -108,6 +108,21 @@ export async function POST(req: NextRequest) {
     }
   }
 
+  // Some workflows fire twice for one booking (created + confirmed) with
+  // different ids: the same start for the same conversation is one booking.
+  if (notice.start) {
+    const { data: sameStart } = await supabase
+      .from("message_batches")
+      .select("id")
+      .eq("workspace_id", wsid)
+      .eq("conversation_id", conv.id)
+      .contains("meta", { booking: { start: notice.start } })
+      .limit(1);
+    if ((sameStart ?? []).length > 0) {
+      return NextResponse.json({ ok: true, matched: true, duplicate: true });
+    }
+  }
+
   const booking: BookingMeta = {
     start: notice.start,
     when: describeStart(notice.start, notice.timeZone),

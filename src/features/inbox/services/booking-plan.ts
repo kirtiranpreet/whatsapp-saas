@@ -65,24 +65,92 @@ export function parseBookingNotice(body: unknown): BookingNotice | null {
   };
 }
 
-/** "2026-10-01T10:00:00+02:00" → "jueves 1 de octubre a las 10:00" (hora de España). */
+function validZone(tz: string | null): string | null {
+  if (!tz) return null;
+  try {
+    new Intl.DateTimeFormat("es-ES", { timeZone: tz });
+    return tz;
+  } catch {
+    return null;
+  }
+}
+
+/** Minutes that `tz` is ahead of UTC at instant `ms`. */
+function zoneOffsetMinutes(ms: number, tz: string): number {
+  const parts = Object.fromEntries(
+    new Intl.DateTimeFormat("en-US", {
+      timeZone: tz,
+      hourCycle: "h23",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+    })
+      .formatToParts(new Date(ms))
+      .map((p) => [p.type, p.value]),
+  );
+  const asUtc = Date.UTC(
+    Number(parts.year),
+    Number(parts.month) - 1,
+    Number(parts.day),
+    Number(parts.hour) % 24,
+    Number(parts.minute),
+    Number(parts.second),
+  );
+  return Math.round((asUtc - ms) / 60000);
+}
+
+/**
+ * The instant a booking starts. GHL sends startTime as a wall-clock time in
+ * the booker's zone ("2026-10-07T06:20:00", selectedTimezone
+ * "America/Montevideo") with no offset; reading that as UTC put the call hours
+ * off. A value with an offset or "Z" is already absolute.
+ */
+export function bookingInstant(start: string, timeZone: string | null): number | null {
+  const m = start.trim().match(
+    /^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2})(?::(\d{2}))?(?:\.\d+)?(Z|[+-]\d{2}:?\d{2})?$/,
+  );
+  if (!m) {
+    const ms = Date.parse(start);
+    return Number.isFinite(ms) ? ms : null;
+  }
+  if (m[7]) {
+    const ms = Date.parse(start);
+    return Number.isFinite(ms) ? ms : null;
+  }
+  const tz = validZone(timeZone) ?? "Europe/Madrid";
+  const naive = Date.UTC(+m[1], +m[2] - 1, +m[3], +m[4], +m[5], +(m[6] ?? 0));
+  let ms = naive - zoneOffsetMinutes(naive, tz) * 60000;
+  ms = naive - zoneOffsetMinutes(ms, tz) * 60000;
+  return ms;
+}
+
+/**
+ * "jueves, 1 de octubre a las 10:00 (hora de España)". Always in Spain time,
+ * where Antonio makes the call; when the booker is elsewhere, their own time
+ * is added so the agent never has to convert.
+ */
 export function describeStart(start: string | null, timeZone: string | null): string | null {
   if (!start) return null;
-  const ms = Date.parse(start);
-  if (!Number.isFinite(ms)) return start; // texto ya legible de GHL
-  let tz = "Europe/Madrid";
-  try {
-    if (timeZone) {
-      new Intl.DateTimeFormat("es-ES", { timeZone });
-      tz = timeZone;
-    }
-  } catch {
-    /* zona no válida: España */
-  }
+  const ms = bookingInstant(start, timeZone);
+  if (ms === null) return start; // texto ya legible de GHL
   const d = new Date(ms);
-  const day = new Intl.DateTimeFormat("es-ES", { timeZone: tz, weekday: "long", day: "numeric", month: "long" }).format(d);
-  const time = new Intl.DateTimeFormat("es-ES", { timeZone: tz, hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).format(d);
-  return `${day} a las ${time}${tz === "Europe/Madrid" ? " (hora de España)" : ` (${tz})`}`;
+  const fmt = (tz: string) => ({
+    day: new Intl.DateTimeFormat("es-ES", { timeZone: tz, weekday: "long", day: "numeric", month: "long" }).format(d),
+    time: new Intl.DateTimeFormat("es-ES", { timeZone: tz, hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).format(d),
+  });
+  const spain = fmt("Europe/Madrid");
+  let text = `${spain.day} a las ${spain.time} (hora de España)`;
+  const own = validZone(timeZone);
+  if (own && own !== "Europe/Madrid") {
+    const local = fmt(own);
+    if (local.time !== spain.time || local.day !== spain.day) {
+      text += `; para la persona, que está en otra zona horaria (${own}), son las ${local.time}${local.day !== spain.day ? ` del ${local.day}` : ""}`;
+    }
+  }
+  return text;
 }
 
 export interface BookingMeta {
@@ -113,6 +181,9 @@ export function bookingInstruction(when: string | null, calendar: string | null 
     `${calendar ? "Usa los textos de después de reservar que corresponden a ese calendario. " : ""}` +
     `Escríbele ahora siguiendo tus instrucciones para después de reservar: confírmale la llamada` +
     `${when ? " con el día y la hora" : ""}, dale las indicaciones para prepararla y envíale lo que tus instrucciones digan que se envía al reservar. ` +
+    `Si ahí se envía un material o una herramienta, pega su enlace completo en el mensaje: nunca la menciones sin el enlace. ` +
+    `Usa exactamente el día y la hora de este aviso, sin convertirlos. ` +
+    `Si ya le confirmaste esta llamada antes en la conversación, no la repitas. ` +
     `No vuelvas a ofrecerle la agenda.]`
   );
 }
