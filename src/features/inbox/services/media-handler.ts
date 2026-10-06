@@ -8,10 +8,14 @@ function svc() {
   );
 }
 
-/** SEC-08: the only host each provider may make us download media from. */
-const ALLOWED_MEDIA_HOST: Record<WhatsAppProvider, string> = {
-  ycloud: "api.ycloud.com",
-  kapso: "api.kapso.ai",
+/**
+ * SEC-08: the only hosts each provider may make us download media from.
+ * Kapso hands voice notes out from app.kapso.ai (an Active Storage redirect to
+ * its blob storage), not only from api.kapso.ai.
+ */
+const ALLOWED_MEDIA_HOSTS: Record<WhatsAppProvider, readonly string[]> = {
+  ycloud: ["api.ycloud.com"],
+  kapso: ["api.kapso.ai", "app.kapso.ai"],
 };
 const BUCKET = "whatsapp-media";
 
@@ -94,7 +98,11 @@ export function validateMediaUrl(
   url: string,
 ): boolean {
   try {
-    return new URL(url).hostname === ALLOWED_MEDIA_HOST[provider];
+    const parsed = new URL(url);
+    return (
+      parsed.protocol === "https:" &&
+      ALLOWED_MEDIA_HOSTS[provider].includes(parsed.hostname)
+    );
   } catch {
     return false;
   }
@@ -117,7 +125,7 @@ export async function downloadAndStoreMedia(
   // SEC-08: block requests to any host but the provider's
   if (!validateMediaUrl(opts.provider, opts.link)) {
     console.error(
-      `[media-handler] SEC-08 violation — URL host is not ${ALLOWED_MEDIA_HOST[opts.provider]}:`,
+      `[media-handler] SEC-08 violation — URL host is not ${ALLOWED_MEDIA_HOSTS[opts.provider].join(" / ")}:`,
       opts.link,
     );
     return null;

@@ -12,6 +12,10 @@ test("each provider may only make us download from its own host (SEC-08)", () =>
   assert.equal(validateMediaUrl("ycloud", "https://api.kapso.ai/media/x"), false);
   assert.equal(validateMediaUrl("kapso", "https://api.ycloud.com/v2/media/x"), false);
   assert.equal(validateMediaUrl("kapso", "https://api.kapso.ai.evil.com/x"), false);
+  assert.equal(validateMediaUrl("kapso", "https://app.kapso.ai/rails/active_storage/blobs/redirect/x/audio.ogg"), true);
+  assert.equal(validateMediaUrl("kapso", "https://app.kapso.ai.evil.com/x"), false);
+  assert.equal(validateMediaUrl("kapso", "http://app.kapso.ai/x"), false);
+  assert.equal(validateMediaUrl("ycloud", "https://app.kapso.ai/x"), false);
   assert.equal(validateMediaUrl("ycloud", "not a url"), false);
 });
 
