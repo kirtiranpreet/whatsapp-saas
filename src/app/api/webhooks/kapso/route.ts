@@ -5,13 +5,23 @@ import {
   parseInbound,
   parseStatusUpdate,
   parseOutboundEcho,
+  parseHistorySync,
   isStatusEvent,
   resolveEventName,
 } from "@/features/inbox/services/kapso-webhook-handler";
 import {
   processInbound,
   processOutboundEcho,
+  processHistoryContact,
 } from "@/features/inbox/services/normalizer";
+import {
+  isKnownContact,
+  workspaceCountryCode,
+} from "@/features/known-contacts/service";
+import {
+  DEFAULT_COUNTRY_CODE,
+  phoneKey,
+} from "@/features/inbox/services/phone";
 import { checkRateLimits } from "@/features/inbox/services/cost-tracker";
 import {
   hasTimeToClaim,
@@ -149,6 +159,19 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
+    // Coexistence history import (kapso.origin 'history_sync'): an old chat
+    // from the Business App. Never answered — it only marks the contact as
+    // someone who already talked to the owner ("contactos antiguos").
+    const history = parseHistorySync(body, eventName);
+    if (history) {
+      const result = await processHistoryContact(
+        ws.workspace_id,
+        history.phone,
+        history.name,
+      );
+      return NextResponse.json({ received: true, history: true, ...result });
+    }
+
     // Coexistence: a `whatsapp.message.sent` carrying origin 'business_app' is
     // not a status update — it's a human answering from the WhatsApp Business
     // App on their phone. Record it and hand the conversation to them, before
@@ -195,9 +218,24 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     }
 
     const workspaceId = ws.workspace_id as string;
+
+    // "Solo contactos nuevos": someone who already talked to the owner before
+    // the agent (imported list or Kapso history) is handled by a person.
+    const cc = await workspaceCountryCode(
+      supabase,
+      workspaceId,
+      DEFAULT_COUNTRY_CODE,
+    );
+    const knownContact = await isKnownContact(
+      supabase,
+      workspaceId,
+      phoneKey(normalized.from, cc),
+    );
+
     const { contact, conversation, message } = await processInbound(
       workspaceId,
       normalized,
+      { knownContact },
     );
 
     // Duplicate wamid — already processed. This is also what absorbs Kapso's

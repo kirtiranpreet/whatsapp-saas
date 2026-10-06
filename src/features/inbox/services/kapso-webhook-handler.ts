@@ -183,6 +183,9 @@ export function parseInbound(
     // Kapso echoes outbound messages through the same event shape.
     const kapso = asRecord(message.kapso);
     if (kapso?.direction === "outbound") return null;
+    // An old chat backfilled from the Business App is not a live message:
+    // answering it would reply to something from weeks ago (parseHistorySync).
+    if (kapso?.origin === "history_sync") return null;
 
     const wamid = asString(message.id);
     if (!wamid) return null;
@@ -395,4 +398,58 @@ export function parseStatusUpdate(
 /** True when the event is one of Kapso's outbound status events. */
 export function isStatusEvent(eventName: string | null): boolean {
   return eventName !== null && eventName in STATUS_EVENTS;
+}
+
+export interface HistorySyncContact {
+  /** The CONTACT's phone (the other side of the chat, never the business) */
+  phone: string;
+  /** Display name, when Kapso knows it */
+  name: string | null;
+}
+
+/**
+ * Recognises an old chat that Kapso backfills from the WhatsApp Business App
+ * (kapso.origin = 'history_sync' — only when the project ran a history import).
+ *
+ * Those messages are NOT live: answering them would have the agent reply to
+ * conversations from weeks ago. What they do tell us is that this contact
+ * already talked to the owner, so they go to the "contactos antiguos" list.
+ *
+ * Works for both directions: an old message the contact sent
+ * (`whatsapp.message.received`, contact = message.from) and an old one the
+ * business sent (`whatsapp.message.sent`, contact = message.to).
+ */
+export function parseHistorySync(
+  body: unknown,
+  eventName: string | null,
+): HistorySyncContact | null {
+  try {
+    const event = asRecord(body);
+    if (!event || event.batch === true) return null;
+    if (
+      eventName !== "whatsapp.message.received" &&
+      eventName !== "whatsapp.message.sent"
+    ) {
+      return null;
+    }
+
+    const message = asRecord(event.message);
+    const kapso = asRecord(message?.kapso);
+    if (!message || kapso?.origin !== "history_sync") return null;
+
+    const conversation = asRecord(event.conversation);
+    const outbound =
+      eventName === "whatsapp.message.sent" || kapso?.direction === "outbound";
+    const phone = outbound
+      ? (asString(message.to) ?? asString(conversation?.phone_number))
+      : (asString(message.from) ?? asString(conversation?.phone_number));
+    if (!phone) return null;
+
+    return {
+      phone,
+      name: asString(asRecord(conversation?.kapso)?.contact_name),
+    };
+  } catch {
+    return null;
+  }
 }

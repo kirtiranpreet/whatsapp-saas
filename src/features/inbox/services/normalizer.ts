@@ -43,9 +43,20 @@ export interface ProcessInboundResult {
  * - Inserts the message, deduplicating on workspace_id + wamid.
  *   Returns message: null when the wamid already exists.
  */
+export interface ProcessInboundOptions {
+  /**
+   * The sender already talked to the owner before the agent existed
+   * ("contactos antiguos"). When this message opens a NEW conversation it
+   * starts handed to a person (human_active), so the agent never answers it.
+   * An existing conversation is left exactly as it is.
+   */
+  knownContact?: boolean;
+}
+
 export async function processInbound(
   workspaceId: string,
   normalized: InboundMessage,
+  opts: ProcessInboundOptions = {},
 ): Promise<ProcessInboundResult> {
   const supabase = svc();
 
@@ -91,6 +102,20 @@ export async function processInbound(
   }
 
   const contact = contactData as ContactRow;
+
+  // Whether this message opens the conversation: only then does a known
+  // contact start handed to a person (see ProcessInboundOptions).
+  let isNewConversation = false;
+  if (opts.knownContact) {
+    const { data: existingConv } = await supabase
+      .from("conversations")
+      .select("id")
+      .eq("workspace_id", workspaceId)
+      .eq("contact_id", contact.id)
+      .eq("channel", "whatsapp")
+      .maybeSingle();
+    isNewConversation = !existingConv;
+  }
 
   // 2. Upsert conversation — reset 24h window on every inbound
   const windowExpiresAt = new Date(
@@ -157,6 +182,27 @@ export async function processInbound(
   }
 
   const message = msgData ? (msgData as MessageRow) : null;
+
+  // A known contact opening a new conversation goes straight to a person.
+  // Through applyTransition (not a manual flip): the buffer gates on state.
+  if (opts.knownContact && isNewConversation && conversation.state === "ai_active") {
+    try {
+      const { applyTransition } = await import("./decision-engine");
+      await applyTransition(conversation.id, "human_active", {
+        trigger: "known_contact",
+        workspaceId,
+      });
+      conversation.state = "human_active";
+      conversation.ai_enabled = false;
+    } catch (err) {
+      // Fail closed: if the handoff didn't stick, still don't answer this one.
+      console.error(
+        "[normalizer] known-contact handoff failed:",
+        err instanceof Error ? err.message : "unknown",
+      );
+      conversation.ai_enabled = false;
+    }
+  }
 
   // F8-D1: media download hooks in here when message.type !== 'text' and message is not a dedup.
   // The webhook handler extracts the media `link` from the raw provider payload and passes it
@@ -313,4 +359,66 @@ export async function processOutboundEcho(
     .eq("workspace_id", workspaceId);
 
   return { conversationId: conversation.id, inserted: true, aiDisabled };
+}
+
+/**
+ * An old chat Kapso backfilled from the Business App (history_sync): the
+ * contact already talked to the owner, so they join the "contactos antiguos"
+ * list. If they somehow already have a conversation the agent is handling, it
+ * goes to a person too. Never replies, never stores the old message.
+ */
+export async function processHistoryContact(
+  workspaceId: string,
+  contactPhone: string,
+  name: string | null,
+): Promise<{ added: boolean }> {
+  const supabase = svc();
+  const { phoneKey } = await import("./phone");
+  const { addKnownContacts, workspaceCountryCode } = await import(
+    "@/features/known-contacts/service"
+  );
+
+  const cc = await workspaceCountryCode(supabase, workspaceId, DEFAULT_COUNTRY_CODE);
+  const key = phoneKey(contactPhone, cc);
+  if (!/^[0-9]{6,15}$/.test(key)) return { added: false };
+
+  await addKnownContacts(
+    supabase,
+    workspaceId,
+    [{ phone: normalizePhone(contactPhone, cc), phone_key: key, name }],
+    "history",
+  );
+
+  const phone = normalizePhone(contactPhone, cc);
+  const { data: contactRow } = await supabase
+    .from("contacts")
+    .select("id")
+    .eq("workspace_id", workspaceId)
+    .eq("phone", phone)
+    .maybeSingle();
+  if (contactRow) {
+    const { data: conv } = await supabase
+      .from("conversations")
+      .select("id, state")
+      .eq("workspace_id", workspaceId)
+      .eq("contact_id", (contactRow as { id: string }).id)
+      .eq("channel", "whatsapp")
+      .maybeSingle();
+    if (conv && (conv as { state: ConversationState }).state === "ai_active") {
+      try {
+        const { applyTransition } = await import("./decision-engine");
+        await applyTransition((conv as { id: string }).id, "human_active", {
+          trigger: "known_contact",
+          workspaceId,
+        });
+      } catch (err) {
+        console.error(
+          "[normalizer] history handoff failed:",
+          err instanceof Error ? err.message : "unknown",
+        );
+      }
+    }
+  }
+
+  return { added: true };
 }
