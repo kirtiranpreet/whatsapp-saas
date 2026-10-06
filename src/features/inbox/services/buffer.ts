@@ -21,7 +21,12 @@ import {
   followUpOf,
   isNoSendReply,
 } from "./follow-ups";
-import { bookingInstruction, bookingOf } from "./booking-plan";
+import {
+  bookingInstruction,
+  bookingMaterialOf,
+  bookingOf,
+  withBookingMaterial,
+} from "./booking-plan";
 import { dispatchVoiceReply } from "@/features/voice/voice-reply";
 import { replyWithVoiceTool } from "@/features/voice/voice-note-tool";
 import {
@@ -1232,6 +1237,26 @@ export async function processNextBatch(): Promise<ProcessBatchResult> {
       return done();
     }
 
+    // ── 8h-bis. The booking confirmation always carries the material ───────
+    // (config.booking_material on the WhatsApp integration): appended when
+    // the agent forgot the link, so it never depends on the model.
+    let replyText = reply.text;
+    if (booking) {
+      const { data: wa } = await supabase
+        .from("integrations")
+        .select("config")
+        .eq("workspace_id", batch.workspace_id)
+        .in("provider", ["kapso", "ycloud"])
+        .eq("enabled", true)
+        .limit(1)
+        .maybeSingle();
+      replyText = withBookingMaterial(
+        replyText,
+        booking.calendar ?? null,
+        bookingMaterialOf(wa?.config ?? null),
+      );
+    }
+
     // ── 8i. Checkpoint the reply before sending it ──────────────────────────
     // From here on, any retry (or a reclaim after this worker dies) delivers
     // this same text instead of calling the model and its tools again. Not
@@ -1248,7 +1273,7 @@ export async function processNextBatch(): Promise<ProcessBatchResult> {
       : undefined;
     batch.meta = {
       ...batch.meta,
-      pending_reply: reply.text,
+      pending_reply: replyText,
       ...(handoffReason ? { pending_handoff: handoffReason } : {}),
       ...(replyVoiceId ? { reply_voice: replyVoiceId } : {}),
     };
@@ -1259,7 +1284,7 @@ export async function processNextBatch(): Promise<ProcessBatchResult> {
       supabase,
       batch,
       mergedText,
-      reply.text,
+      replyText,
       isLastAttempt,
       progress,
       handoffReason,

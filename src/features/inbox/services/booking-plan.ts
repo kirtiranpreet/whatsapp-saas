@@ -187,3 +187,45 @@ export function bookingInstruction(when: string | null, calendar: string | null 
     `No vuelvas a ofrecerle la agenda.]`
   );
 }
+
+/**
+ * A link that must reach whoever books a call (e.g. the "6 barreras" tool for
+ * the training call). Configured per workspace on the WhatsApp integration as
+ * config.booking_material = { url, calendar_contains? }.
+ */
+export interface BookingMaterial {
+  url: string;
+  /** Only for calendars whose name contains this text (any calendar if empty). */
+  calendar_contains?: string;
+}
+
+export function bookingMaterialOf(config: unknown): BookingMaterial | null {
+  const m = (config as { booking_material?: unknown } | null)?.booking_material as
+    | Record<string, unknown>
+    | undefined;
+  if (!m || typeof m.url !== "string" || !/^https:\/\//.test(m.url)) return null;
+  return {
+    url: m.url,
+    calendar_contains: typeof m.calendar_contains === "string" ? m.calendar_contains : undefined,
+  };
+}
+
+const normalize = (s: string) => s.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
+
+/**
+ * The confirmation after a booking always carries the material link: when the
+ * agent mentioned it without the URL (or forgot it), the link is appended.
+ */
+export function withBookingMaterial(
+  text: string,
+  calendar: string | null,
+  material: BookingMaterial | null,
+): string {
+  if (!material) return text;
+  if (material.calendar_contains) {
+    if (!calendar || !normalize(calendar).includes(normalize(material.calendar_contains))) return text;
+  }
+  const bare = material.url.replace(/\/$/, "");
+  if (text.includes(bare)) return text;
+  return `${text.trimEnd()}\n\n${material.url}`;
+}

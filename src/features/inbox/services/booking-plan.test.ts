@@ -76,3 +76,20 @@ test("GHL wall-clock start in the booker's zone becomes the right Spain time", (
     "martes, 10 de noviembre a las 10:00 (hora de España)",
   );
 });
+
+import { withBookingMaterial, bookingMaterialOf } from "./booking-plan.ts";
+
+test("the booking confirmation always carries the material link", () => {
+  const m = bookingMaterialOf({ booking_material: { url: "https://rompetusbarrerasmentales.com/6-barreras/", calendar_contains: "Formación" } });
+  assert.ok(m);
+  assert.equal(
+    withBookingMaterial("Te dejo la herramienta interactiva.", "Llamada informativa - Formación Hipnosis", m),
+    "Te dejo la herramienta interactiva.\n\nhttps://rompetusbarrerasmentales.com/6-barreras/",
+  );
+  assert.equal(
+    withBookingMaterial("Aquí: https://rompetusbarrerasmentales.com/6-barreras", "Llamada informativa - Formacion Hipnosis", m),
+    "Aquí: https://rompetusbarrerasmentales.com/6-barreras",
+  );
+  assert.equal(withBookingMaterial("Hola", "Llamada - Empresas", m), "Hola");
+  assert.equal(bookingMaterialOf({}), null);
+});
