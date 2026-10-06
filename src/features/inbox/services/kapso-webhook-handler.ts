@@ -73,6 +73,8 @@ export interface NormalizedInbound {
   mediaFilename: string | null;
   /** Transcript Kapso already produced for voice notes, when present */
   transcript: string | null;
+  /** Kapso's own conversation id (event.conversation.id), when present */
+  kapsoConversationId: string | null;
 }
 
 /** Inbound message types that carry a downloadable media payload. */
@@ -264,6 +266,7 @@ export function parseInbound(
       mediaMime,
       mediaFilename,
       transcript,
+      kapsoConversationId: asString(conversation?.id),
     };
   } catch {
     return null;

@@ -12,16 +12,7 @@ import {
 import {
   processInbound,
   processOutboundEcho,
-  processHistoryContact,
 } from "@/features/inbox/services/normalizer";
-import {
-  isKnownContact,
-  workspaceCountryCode,
-} from "@/features/known-contacts/service";
-import {
-  DEFAULT_COUNTRY_CODE,
-  phoneKey,
-} from "@/features/inbox/services/phone";
 import { checkRateLimits } from "@/features/inbox/services/cost-tracker";
 import {
   hasTimeToClaim,
@@ -38,6 +29,7 @@ import {
 } from "@/features/inbox/services/media-understanding";
 import { decryptCredentials } from "@/shared/lib/integration-secrets";
 import { applyMessageStatus } from "@/features/inbox/services/message-status";
+import { newContactGate } from "@/features/inbox/services/new-contact-gate";
 
 // Keep the function alive long enough for the best-effort fast path below
 // (sleep through the buffer window + AI generation). The cron is the fallback.
@@ -143,15 +135,17 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     // a status update must NEVER fall through to 200 unverified. Decryption
     // happens per candidate, only once we know which rows are in play.
     let ws: IntegrationRow | null = null;
+    let wsApiKey: string | null = null;
     for (const candidate of candidates) {
       const creds = (await decryptCredentials(
         candidate.credentials,
         candidate.workspace_id,
         "kapso",
-      )) as { webhook_signing_secret?: string };
+      )) as { webhook_signing_secret?: string; kapso_api_key?: string };
       const secret = creds.webhook_signing_secret;
       if (secret && verifyKapsoSignature(rawBody, sigHeader, secret)) {
         ws = candidate;
+        wsApiKey = typeof creds.kapso_api_key === "string" ? creds.kapso_api_key : null;
         break;
       }
     }
@@ -160,16 +154,9 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     }
 
     // Coexistence history import (kapso.origin 'history_sync'): an old chat
-    // from the Business App. Never answered — it only marks the contact as
-    // someone who already talked to the owner ("contactos antiguos").
-    const history = parseHistorySync(body, eventName);
-    if (history) {
-      const result = await processHistoryContact(
-        ws.workspace_id,
-        history.phone,
-        history.name,
-      );
-      return NextResponse.json({ received: true, history: true, ...result });
+    // backfilled from the Business App. Never answered.
+    if (parseHistorySync(body, eventName)) {
+      return NextResponse.json({ received: true, history: true });
     }
 
     // Coexistence: a `whatsapp.message.sent` carrying origin 'business_app' is
@@ -218,25 +205,8 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     }
 
     const workspaceId = ws.workspace_id as string;
-
-    // "Solo contactos nuevos": someone who already talked to the owner before
-    // the agent (imported list or Kapso history) is handled by a person.
-    const cc = await workspaceCountryCode(
-      supabase,
-      workspaceId,
-      DEFAULT_COUNTRY_CODE,
-    );
-    const knownContact = await isKnownContact(
-      supabase,
-      workspaceId,
-      phoneKey(normalized.from, cc),
-    );
-
-    const { contact, conversation, message } = await processInbound(
-      workspaceId,
-      normalized,
-      { knownContact },
-    );
+    const { contact, conversation, message, isNewConversation } =
+      await processInbound(workspaceId, normalized);
 
     // Duplicate wamid — already processed. This is also what absorbs Kapso's
     // at-least-once delivery, since its signature carries no anti-replay window.
@@ -300,6 +270,49 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
           }
         }
       : null;
+
+    // "Solo contactos nuevos" (personal numbers in coexistence): a conversation
+    // opened by someone who already talked to the owner, or whose first message
+    // is personal, goes to a person silently. The agent never writes in it.
+    const onlyNew =
+      (ws.config as { only_new_contacts?: boolean }).only_new_contacts === true;
+    if (onlyNew && isNewConversation && conversation.ai_enabled) {
+      const verdict = wsApiKey && configuredPhoneNumberId
+        ? await newContactGate({
+            workspaceId,
+            apiKey: wsApiKey,
+            phoneNumberId: configuredPhoneNumberId,
+            contactPhone: normalized.from,
+            kapsoConversationId: normalized.kapsoConversationId,
+            messageTime: normalized.createTime,
+            text: normalized.text,
+          })
+        : ({ answer: false, reason: "history_check_failed" } as const);
+      if (!verdict.answer) {
+        try {
+          const { applyTransition } = await import(
+            "@/features/inbox/services/decision-engine"
+          );
+          await applyTransition(conversation.id, "human_active", {
+            trigger: `not_new_contact:${verdict.reason}`,
+            workspaceId,
+          });
+        } catch (err) {
+          console.error(
+            "[webhook] not-new-contact handoff failed:",
+            err instanceof Error ? err.message : "unknown",
+          );
+          // Must not stay with the agent: the next message would be answered.
+          await supabase
+            .from("conversations")
+            .update({ state: "human_active", ai_enabled: false })
+            .eq("id", conversation.id)
+            .eq("workspace_id", workspaceId);
+        }
+        if (mediaJob) after(mediaJob);
+        return NextResponse.json({ received: true, ai: false, gate: verdict.reason });
+      }
+    }
 
     // A reaction is recorded in the thread, but it isn't something to answer:
     // it must not start a paid agent turn.
