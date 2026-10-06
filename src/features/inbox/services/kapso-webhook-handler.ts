@@ -299,6 +299,18 @@ export interface OutboundEcho {
  * Returns null for our own sends (origin 'cloud_api') and for history backfills
  * ('history_sync'), which are not live human activity.
  */
+/** Messages from the owner's phone that mean "I'm answering this one". */
+export const HUMAN_TAKEOVER_TYPES = new Set([
+  "text",
+  "audio",
+  "voice",
+  "image",
+  "video",
+  "document",
+  "location",
+  "contacts",
+]);
+
 export function parseOutboundEcho(
   body: unknown,
   eventName: string | null,
@@ -323,6 +335,10 @@ export function parseOutboundEcho(
     if (!to) return null;
 
     const msgType = asString(message.type) ?? "unknown";
+    // Only a real reply takes the conversation over: a text, a voice note or
+    // a file. A reaction (a heart on a message), a sticker or deleting a
+    // message is not the owner answering, so the agent keeps going.
+    if (!HUMAN_TAKEOVER_TYPES.has(msgType)) return null;
 
     let text: string | null = null;
     if (msgType === "text") {
