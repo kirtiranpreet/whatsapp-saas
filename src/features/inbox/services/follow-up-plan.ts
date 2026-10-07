@@ -185,6 +185,22 @@ export function followUpInstruction(step: 1 | 2 | 3, hoursSilent: number): strin
   );
 }
 
+/**
+ * The agent's answer when it realises mid-conversation that the person is not
+ * a prospect (someone the owner knows, a supplier, a sales call): nothing is
+ * sent and the chat goes to the owner.
+ */
+export const NOT_A_CLIENT_TOKEN = "[[NO_ES_CLIENTE]]";
+
+export function isNotAClientReply(text: string): boolean {
+  return text.includes(NOT_A_CLIENT_TOKEN);
+}
+
+/** The reply without the token, in case it shows up next to real text. */
+export function stripNotAClientToken(text: string): string {
+  return text.split(NOT_A_CLIENT_TOKEN).join("").trim();
+}
+
 export function isNoSendReply(text: string): boolean {
   return text.includes(NO_SEND_TOKEN);
 }

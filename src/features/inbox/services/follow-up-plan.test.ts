@@ -75,3 +75,11 @@ test("instruction, meta and no-send", () => {
   assert.equal(isNoSendReply("NO_ENVIAR"), true);
   assert.equal(isNoSendReply("¿Sigues por ahí, Marta?"), false);
 });
+
+test("not-a-client token: detected and never sent", async () => {
+  const { isNotAClientReply, stripNotAClientToken, NOT_A_CLIENT_TOKEN } = await import("./follow-up-plan.ts");
+  assert.equal(isNotAClientReply(NOT_A_CLIENT_TOKEN), true);
+  assert.equal(isNotAClientReply(`  ${NOT_A_CLIENT_TOKEN}\n`), true);
+  assert.equal(isNotAClientReply("Hola, ¿cómo te llamas?"), false);
+  assert.equal(stripNotAClientToken(`Gracias. ${NOT_A_CLIENT_TOKEN}`), "Gracias.");
+});

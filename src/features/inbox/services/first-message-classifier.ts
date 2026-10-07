@@ -4,18 +4,21 @@
 
 export type FirstMessageVerdict = "prospect" | "personal";
 
-export const CLASSIFIER_PROMPT = `Eres un filtro. Recibes el PRIMER mensaje que alguien envía al WhatsApp personal de Antonio Sastre, hipnotista y mentor de ventas, que ofrece formaciones de hipnosis, sesiones privadas de hipnosis, mentoring 1:1 y formación de ventas para empresas.
+export const CLASSIFIER_PROMPT = `Eres un filtro estricto. Recibes el PRIMER mensaje que alguien envía al WhatsApp personal de Antonio Sastre, hipnotista y mentor de ventas, que ofrece formaciones de hipnosis (presencial Hipnosis Rápida de Alto Impacto y online Hipnosis Conversacional), sesiones privadas de hipnosis, mentoring 1:1 y formación de ventas para empresas. Por este número le escriben también su familia, amigos, alumnos, proveedores y colaboradores, y a ellos les responde Antonio en persona.
 
 Responde con UNA sola palabra:
-- NUEVO: parece una persona interesada en sus servicios o que pide información, o es un saludo neutro sin más ("Hola", "Buenas tardes", "Info", "Quiero información", "Hola, vi vuestro anuncio", mensajes ya escritos desde una web o un anuncio, preguntas por precios, fechas, ciudades o la hipnosis).
-- CONOCIDO: parece alguien que ya conoce a Antonio: le trata con confianza o cariño ("Hola Antonio, ¿cómo estás?", "¡Hola papá!", "¿Qué tal todo?"), habla de algo personal, familiar o de trabajo que comparten, hace bromas o comentarios como si ya hubiera conversación previa, es un antiguo alumno, o envía felicitaciones, recados o mensajes que no buscan información.
+- NUEVO: SOLO si el mensaje pide información clara sobre sus servicios: menciona la formación, el curso, la hipnosis, una sesión, el mentoring, un anuncio, el webinar o una ciudad o fecha de la formación, pregunta precios, fechas o cómo apuntarse, o es uno de los mensajes ya escritos de la web o de un anuncio ("Quiero información", "Quiero reservar mi plaza en…", "Hola, vi el anuncio…", mensajes con la palabra HIPNOSIS).
+- CONOCIDO: todo lo demás. Por ejemplo: un saludo suelto sin pedir nada ("Hola", "Buenas", "¿Qué tal?"), mensajes que tratan a Antonio con confianza o le llaman por su nombre para algo personal, temas de trabajo o logística (salas, alquileres, proveedores, facturas, pagos, presupuestos, colaboraciones), enlaces, fotos o contactos sin una pregunta sobre sus servicios, ofertas comerciales o cobros de otras empresas, felicitaciones, recados y cualquier mensaje que no sea claramente una persona interesada en sus servicios.
 
-Si dudas entre las dos, responde NUEVO.`;
+Si dudas, responde CONOCIDO: Antonio ve todos los mensajes en su móvil y prefiere atender él a alguien antes que la asistente le escriba a un conocido.`;
 
-/** Pure: turns the model's answer into a verdict. Anything unclear is a prospect. */
+/**
+ * Pure: turns the model's answer into a verdict. Only a clear NUEVO is a
+ * prospect; anything else stays with the owner.
+ */
 export function parseVerdict(raw: string): FirstMessageVerdict {
   const word = raw.trim().toUpperCase();
-  return word.startsWith("CONOCIDO") ? "personal" : "prospect";
+  return word.startsWith("NUEVO") ? "prospect" : "personal";
 }
 
 const CLASSIFIER_MODEL = "openai/gpt-4o-mini";
@@ -34,12 +37,12 @@ export async function classifyFirstMessage(params: {
     });
     return parseVerdict(result.text);
   } catch (err) {
-    // The Kapso history check already passed: a model hiccup must not leave a
-    // real lead unanswered.
+    // On a personal number a lead waiting for the owner (who sees it on the
+    // phone) is better than the assistant writing to someone he knows.
     console.error(
       "[first-message-classifier] failed:",
       err instanceof Error ? err.message : "unknown",
     );
-    return "prospect";
+    return "personal";
   }
 }

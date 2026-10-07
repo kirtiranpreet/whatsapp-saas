@@ -20,6 +20,8 @@ import {
   followUpInstruction,
   followUpOf,
   isNoSendReply,
+  isNotAClientReply,
+  stripNotAClientToken,
 } from "./follow-ups";
 import {
   bookingInstruction,
@@ -1226,6 +1228,36 @@ export async function processNextBatch(): Promise<ProcessBatchResult> {
       await saveBatchMeta(supabase, batch);
       await markBatchProcessed(batch, mergedText, supabase);
       return done();
+    }
+
+    // The agent realised this is not a prospect (someone the owner knows, a
+    // supplier, a sales call): nothing is sent and the owner takes the chat.
+    if (!handoffReason && writeRuns.length === 0 && isNotAClientReply(reply.text)) {
+      try {
+        await applyTransition(batch.conversation_id, "human_active", {
+          trigger: "agent_retired:not_a_client",
+          workspaceId: batch.workspace_id,
+        });
+      } catch (err) {
+        console.error("[buffer] not-a-client handoff failed:", {
+          batchId: batch.id,
+          error: err instanceof Error ? err.message : String(err),
+        });
+        // Must not stay with the agent: the next message would be answered.
+        await supabase
+          .from("conversations")
+          .update({ state: "human_active", ai_enabled: false })
+          .eq("id", batch.conversation_id)
+          .eq("workspace_id", batch.workspace_id);
+      }
+      batch.meta = { ...batch.meta, not_a_client: true };
+      await saveBatchMeta(supabase, batch);
+      await markBatchProcessed(batch, mergedText, supabase);
+      return done();
+    }
+    // The token never reaches the contact, whatever else the turn did.
+    if (isNotAClientReply(reply.text)) {
+      reply.text = stripNotAClientToken(reply.text);
     }
 
     if (!reply.text.trim()) {

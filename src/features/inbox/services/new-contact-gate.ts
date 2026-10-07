@@ -6,8 +6,8 @@
 //   1. Kapso has no earlier conversation with that number (Kapso stores every
 //      chat of the number since it was connected, including the ones the owner
 //      handles from the phone), and
-//   2. the first message reads like a prospect asking about the services, not
-//      a friend, relative or old student writing to the owner.
+//   2. the first message clearly asks about the services (strict: a bare
+//      greeting, media with no text or anything doubtful stays with the owner).
 // Otherwise the conversation goes to a person (human_active) silently: the
 // owner sees it on the phone as always and the agent never writes in it.
 //
@@ -70,11 +70,14 @@ export async function newContactGate(
   }
   if (!isNew) return { answer: false, reason: "kapso_history" };
 
+  // Only a first message that clearly asks about the services is answered. A
+  // photo, audio, contact card or link with no text is left to the owner.
   const text = input.text?.trim();
-  if (text && text !== "[Multimedia]") {
-    const verdict = await classify({ workspaceId: input.workspaceId, text });
-    if (verdict === "personal") return { answer: false, reason: "personal_message" };
+  if (!text || text === "[Multimedia]") {
+    return { answer: false, reason: "personal_message" };
   }
+  const verdict = await classify({ workspaceId: input.workspaceId, text });
+  if (verdict === "personal") return { answer: false, reason: "personal_message" };
 
   return { answer: true, reason: "new_contact" };
 }

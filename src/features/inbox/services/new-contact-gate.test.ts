@@ -73,7 +73,9 @@ test("classifier verdict parsing", () => {
   assert.equal(parseVerdict("CONOCIDO"), "personal");
   assert.equal(parseVerdict(" conocido."), "personal");
   assert.equal(parseVerdict("NUEVO"), "prospect");
-  assert.equal(parseVerdict("no sé"), "prospect");
+  // Strict: anything that isn't a clear NUEVO stays with the owner.
+  assert.equal(parseVerdict("no sé"), "personal");
+  assert.equal(parseVerdict(""), "personal");
 });
 
 test("gate: history wins, then the first message, failures stay silent", async () => {
@@ -106,7 +108,14 @@ test("gate: history wins, then the first message, failures stay silent", async (
       checkHistory: async () => true,
       classify: async () => { classified = true; return "personal"; },
     }),
-    { answer: true, reason: "new_contact" },
+    { answer: false, reason: "personal_message" },
   );
   assert.equal(classified, false);
+  assert.deepEqual(
+    await newContactGate({ ...base, text: null }, {
+      checkHistory: async () => true,
+      classify: async () => "prospect",
+    }),
+    { answer: false, reason: "personal_message" },
+  );
 });
