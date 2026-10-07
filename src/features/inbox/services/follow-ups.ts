@@ -17,6 +17,8 @@ export {
   followUpInstruction,
   followUpOf,
   isNoSendReply,
+  isNotAClientReply,
+  stripNotAClientToken,
 } from "./follow-up-plan";
 
 function svc() {
