@@ -49,6 +49,7 @@ const LLM_TIMEOUT_MS = 60_000;
 const LLM_TOOL_TURN_TIMEOUT_MS = 120_000;
 import { registry } from "@/features/tools/index";
 import { getActiveAgent } from "@/features/agents/services/active-agent";
+import { promptCacheFetch } from "./prompt-cache";
 import { decryptCredentials } from "@/shared/lib/integration-secrets";
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -180,6 +181,7 @@ export async function generateReply(
         process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000",
       "X-Title": "Agente WhatsApp",
     },
+    fetch: promptCacheFetch,
   });
 
   const result = await generateText({
@@ -237,6 +239,7 @@ export async function generateChatReply(params: {
         process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000",
       "X-Title": "Agente WhatsApp",
     },
+    fetch: promptCacheFetch,
   });
 
   // Bridge Forge tools → AI SDK ToolSet (same shape as generateWithTools).
@@ -380,6 +383,7 @@ export async function generateWithTools(
         process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000",
       "X-Title": "Agente WhatsApp",
     },
+    fetch: promptCacheFetch,
   });
 
   // Build AI SDK v6 ToolSet from available Forge tools.

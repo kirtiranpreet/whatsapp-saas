@@ -4,13 +4,24 @@
  * Both production (buffer.ts) and the in-UI playground (test-chat) MUST use this
  * so they never drift. Pure string assembly — no DB, no "use server".
  *
- * Order (guardrails go LAST — models obey end-of-prompt instructions most;
- * tool-honesty note goes after even that, so no workspace guardrail can
- * override it):
- *   now → summary → business info → knowledge base → response style →
- *   prompt base → WhatsApp format note → media capability note →
+ * Order. What never changes between turns goes first, so the provider can
+ * cache it (prompt caching): everything before PROMPT_CACHE_BREAK is the same
+ * for every message of the workspace's agent. What changes per turn (time,
+ * summary, business info, KB) goes after it. Guardrails stay near the end —
+ * models obey end-of-prompt instructions most — and the tool-honesty note goes
+ * after even that, so no workspace guardrail can override it:
+ *   response style → prompt base → WhatsApp format note → media capability
+ *   note → [cache break] → now → summary → business info → knowledge base →
  *   strict rules/restrictions → tool-honesty note
  */
+
+/**
+ * Marks where the cacheable (fixed) part of the system prompt ends. The
+ * OpenRouter client turns it into a cache breakpoint for models that support
+ * it (Anthropic) and removes it for every other model, so it never reaches a
+ * model as text.
+ */
+export const PROMPT_CACHE_BREAK = "[[prompt-cache-break]]";
 
 export type ResponseStyle = "concise" | "balanced" | "detailed";
 
@@ -125,18 +136,19 @@ export function buildSystemPrompt(parts: BuildSystemPromptParts): string {
   const base = substituteVars(parts.promptBase, parts.vars);
   const guardrailsBlock = buildGuardrailsBlock(parts.guardrails);
 
-  return [
+  const fixed = [styleBlock, base, WHATSAPP_FORMAT_NOTE, MEDIA_CAPABILITY_NOTE]
+    .filter(Boolean)
+    .join("\n\n");
+  const perTurn = [
     parts.nowContext,
     summaryBlock,
     parts.bizContext,
     parts.kbContext ?? "",
-    styleBlock,
-    base,
-    WHATSAPP_FORMAT_NOTE,
-    MEDIA_CAPABILITY_NOTE,
     guardrailsBlock,
     TOOL_HONESTY_NOTE,
   ]
     .filter(Boolean)
     .join("\n\n");
+
+  return `${fixed}\n\n${PROMPT_CACHE_BREAK}\n\n${perTurn}`;
 }
