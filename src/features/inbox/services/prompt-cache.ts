@@ -3,7 +3,7 @@
  *
  * buildSystemPrompt() puts everything that never changes between turns first
  * and marks where it ends with PROMPT_CACHE_BREAK. For Anthropic models that
- * marker becomes a cache breakpoint (`cache_control: ephemeral` on the fixed
+ * marker becomes a cache breakpoint (`cache_control: ephemeral`, 1-hour TTL, on the fixed
  * part), so later turns re-read that part at a fraction of the price. For any
  * other model the marker is simply removed. Nothing else in the request
  * changes, so the model reads exactly the same text either way.
@@ -12,6 +12,12 @@
 import { PROMPT_CACHE_BREAK } from "./prompt-builder";
 
 type ChatMessage = { role?: unknown; content?: unknown; [k: string]: unknown };
+
+// 1-hour cache: writing it costs 2x the input price (5 minutes: 1.25x) and
+// reading it 0.1x either way. With conversations spread through the day the
+// 5-minute cache keeps expiring between messages and gets written again and
+// again; one hour keeps it warm, so it is cheaper overall.
+const CACHE_CONTROL = { type: "ephemeral", ttl: "1h" } as const;
 
 function supportsCacheControl(model: unknown): boolean {
   return typeof model === "string" && model.startsWith("anthropic/");
@@ -38,7 +44,7 @@ export function applyPromptCache(body: Record<string, unknown>): Record<string, 
       return { ...m, content: [fixed, rest].filter(Boolean).join("\n\n") };
     }
     const parts: Array<Record<string, unknown>> = [
-      { type: "text", text: fixed, cache_control: { type: "ephemeral" } },
+      { type: "text", text: fixed, cache_control: CACHE_CONTROL },
     ];
     if (rest) parts.push({ type: "text", text: rest });
     return { ...m, content: parts };

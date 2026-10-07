@@ -35,7 +35,7 @@ test("for Anthropic models the fixed part becomes a cached text part", () => {
   const msgs = body.messages as Array<{ role: string; content: unknown }>;
   const parts = msgs[0].content as Array<{ type: string; text: string; cache_control?: unknown }>;
   assert.equal(parts.length, 2);
-  assert.deepEqual(parts[0].cache_control, { type: "ephemeral" });
+  assert.deepEqual(parts[0].cache_control, { type: "ephemeral", ttl: "1h" });
   assert.ok(parts[0].text.includes("PROMPT BASE"));
   assert.equal(parts[1].cache_control, undefined);
   assert.ok(parts[1].text.includes("AHORA"));
