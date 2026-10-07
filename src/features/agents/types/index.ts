@@ -16,6 +16,12 @@ export interface AgentConfig {
   responseStyle?: ResponseStyle;
   /** Pause the AI when a human sends a manual message (default true). */
   sleepOnManualMessage?: boolean;
+  /**
+   * Search the workspace Knowledge Base on every turn (default true). Off:
+   * the agent answers from its prompt only — fewer tokens per reply, and no
+   * stale document can contradict the prompt. The documents are kept.
+   */
+  useKnowledgeBase?: boolean;
   /** config is open JSON; allow arbitrary extra keys. */
   [key: string]: unknown;
 }

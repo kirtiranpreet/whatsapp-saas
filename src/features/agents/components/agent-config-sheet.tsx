@@ -60,6 +60,7 @@ export function AgentConfigSheet({
   const [responseStyle, setResponseStyle] = useState<ResponseStyle>(
     agent.config.responseStyle ?? "balanced",
   );
+  const [useKb, setUseKb] = useState(agent.config.useKnowledgeBase !== false);
   const [sleepOnManual, setSleepOnManual] = useState(
     agent.config.sleepOnManualMessage !== false,
   );
@@ -98,6 +99,7 @@ export function AgentConfigSheet({
             summarize,
             responseStyle,
             sleepOnManualMessage: sleepOnManual,
+            useKnowledgeBase: useKb,
             voiceReply,
             followUps: {
               ...((agent.config.followUps as Record<string, unknown> | undefined) ?? {}),
@@ -217,6 +219,23 @@ export function AgentConfigSheet({
                   checked={sleepOnManual}
                   onCheckedChange={setSleepOnManual}
                   aria-label="Pausar IA con mensaje manual"
+                />
+              </div>
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <p className="text-sm font-medium text-foreground">
+                    Consultar la Knowledge Base
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    Busca en los documentos de la Knowledge Base en cada
+                    respuesta. Apagado, responde solo con sus instrucciones:
+                    gasta menos y los documentos se conservan.
+                  </p>
+                </div>
+                <Switch
+                  checked={useKb}
+                  onCheckedChange={setUseKb}
+                  aria-label="Consultar la Knowledge Base"
                 />
               </div>
             </div>

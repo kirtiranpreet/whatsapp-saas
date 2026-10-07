@@ -6,9 +6,13 @@
 import type { z } from "zod";
 import { generateChatReply } from "@/features/inbox/services/openrouter";
 
-/** Modelo para el análisis. Configurable por variable de entorno. */
+/**
+ * Modelo para el análisis. Configurable por variable de entorno. Es una tarea
+ * interna (extraer FAQ, objeciones y motivos en JSON), no habla con clientes:
+ * Haiku la hace bien por un tercio del precio de Sonnet.
+ */
 export function insightsModel(): string {
-  return process.env.INSIGHTS_MODEL?.trim() || "anthropic/claude-sonnet-4.6";
+  return process.env.INSIGHTS_MODEL?.trim() || "anthropic/claude-haiku-4.5";
 }
 
 export function parseJsonLoose(text: string): unknown {

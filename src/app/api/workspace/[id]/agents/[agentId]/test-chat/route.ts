@@ -182,10 +182,16 @@ export async function POST(
   const lastUserMessage =
     [...parsed.data.messages].reverse().find((m) => m.role === "user")
       ?.content ?? "";
-  const [kbResults, kbLinks] = await Promise.all([
-    searchKb(workspaceId, lastUserMessage, 3),
-    listKbSourceLinks(workspaceId),
-  ]);
+  // Same switch as buffer.ts: an agent set to answer from its prompt only
+  // gets no KB here either.
+  const useKb =
+    ((agent.config ?? {}) as AgentConfig).useKnowledgeBase !== false;
+  const [kbResults, kbLinks] = useKb
+    ? await Promise.all([
+        searchKb(workspaceId, lastUserMessage, 3),
+        listKbSourceLinks(workspaceId),
+      ])
+    : [[], []];
   // The files the agent may send, listed only when send_file is on — as in
   // buffer.ts.
   // A failure here is retried below, inside the try that reports it.

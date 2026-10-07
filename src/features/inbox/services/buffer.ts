@@ -974,6 +974,9 @@ export async function processNextBatch(): Promise<ProcessBatchResult> {
     // The active agent (if any) selects its mode-scoped published prompt; the
     // resolver falls back to the global prompt when there is no active agent.
     const activeAgent = await getActiveAgent(batch.workspace_id);
+    // An agent can be told to answer from its prompt only (Settings → agent →
+    // "Consultar la Knowledge Base" off): no search, no reference links.
+    const useKb = activeAgent?.config.useKnowledgeBase !== false;
     const [resolvedPrompt, businessInfo, kbResults, kbLinks] =
       await Promise.all([
         resolveSystemPrompt(
@@ -983,7 +986,7 @@ export async function processNextBatch(): Promise<ProcessBatchResult> {
         getBusinessInfo(batch.workspace_id),
         // The KB is context, not the turn: a slow or failing search (its
         // embedding times out at 15 s) answers without it.
-        (systemTurn
+        (systemTurn || !useKb
           ? Promise.resolve([] as Awaited<ReturnType<typeof searchKb>>)
           : searchKb(batch.workspace_id, mergedText, 3)
         ).catch((err: unknown) => {
@@ -993,7 +996,9 @@ export async function processNextBatch(): Promise<ProcessBatchResult> {
           });
           return [];
         }),
-        listKbSourceLinks(batch.workspace_id),
+        useKb
+          ? listKbSourceLinks(batch.workspace_id)
+          : Promise.resolve([] as Awaited<ReturnType<typeof listKbSourceLinks>>),
       ]);
 
     // Voice replies (ElevenLabs): the agent's setting, only with a key set.
