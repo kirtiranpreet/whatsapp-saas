@@ -18,12 +18,14 @@ function svc() {
 
 type Svc = ReturnType<typeof svc>;
 
-// Hard cut: AI is completely halted above this daily token count. Kept at the
-// 1,000,000 tokens the old per-turn check in cost-tracker enforced.
-const DAILY_TOKEN_HARD_LIMIT = 1_000_000;
+// Hard cut: AI is completely halted above this daily token count. The value
+// comes from Integraciones → OpenRouter → "Budget diario (tokens)"
+// (integrations.config.daily_budget_tokens); this default applies only when
+// the workspace has not set one.
+const DEFAULT_DAILY_TOKEN_HARD_LIMIT = 1_000_000;
 
-// Warn threshold: degrade to a cheaper model above this count
-const DAILY_TOKEN_WARN_THRESHOLD = 800_000;
+// Warn threshold: degrade to a cheaper model above this share of the limit.
+const WARN_RATIO = 0.8;
 
 const FALLBACK_MODEL = "openai/gpt-4o-mini";
 
@@ -65,6 +67,9 @@ export async function enforceCostPolicy(
   const dayStart = new Date();
   dayStart.setUTCHours(0, 0, 0, 0);
 
+  const DAILY_TOKEN_HARD_LIMIT = await readDailyLimit(supabase, workspaceId);
+  const DAILY_TOKEN_WARN_THRESHOLD = Math.floor(DAILY_TOKEN_HARD_LIMIT * WARN_RATIO);
+
   const totalTokensToday = await readDailyTokens(supabase, workspaceId, dayStart);
 
   if (totalTokensToday >= DAILY_TOKEN_HARD_LIMIT) {
@@ -95,6 +100,32 @@ export async function enforceCostPolicy(
   }
 
   return { policy: "allow", reason: "within_budget" };
+}
+
+/**
+ * The workspace's daily hard limit, as set in Integraciones → OpenRouter.
+ * A missing, zero, negative or unreadable value falls back to the default,
+ * so a read error never lifts the cap.
+ */
+async function readDailyLimit(supabase: Svc, workspaceId: string): Promise<number> {
+  try {
+    const { data, error } = await supabase
+      .from("integrations")
+      .select("config")
+      .eq("workspace_id", workspaceId)
+      .eq("provider", "openrouter")
+      .maybeSingle();
+    if (error) {
+      console.error("[cost-enforcer] failed to read daily_budget_tokens:", error);
+      return DEFAULT_DAILY_TOKEN_HARD_LIMIT;
+    }
+    const raw = (data?.config as Record<string, unknown> | null)?.daily_budget_tokens;
+    const n = typeof raw === "string" ? Number(raw) : raw;
+    if (typeof n === "number" && Number.isFinite(n) && n > 0) return Math.floor(n);
+  } catch (err) {
+    console.error("[cost-enforcer] failed to read daily_budget_tokens:", err);
+  }
+  return DEFAULT_DAILY_TOKEN_HARD_LIMIT;
 }
 
 /**

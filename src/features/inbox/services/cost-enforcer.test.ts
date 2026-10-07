@@ -31,8 +31,20 @@ function selectChain() {
   return chain;
 }
 
+// What integrations(openrouter).config holds for the workspace.
+let integrationConfig: QueueEntry = { data: null, error: null };
+
+function integrationChain() {
+  const chain: any = {};
+  chain.select = () => chain;
+  chain.eq = () => chain;
+  chain.maybeSingle = () => Promise.resolve(integrationConfig);
+  return chain;
+}
+
 const fakeClient = {
-  from() {
+  from(table: string) {
+    if (table === "integrations") return integrationChain();
     return {
       select: () => selectChain(),
       insert(row: unknown) {
@@ -61,7 +73,41 @@ function reset() {
   insertedRows.length = 0;
   selectQueue = [];
   selectOps = [];
+  integrationConfig = { data: null, error: null };
 }
+
+test("the hard limit and warn threshold follow the workspace's daily_budget_tokens", async () => {
+  reset();
+  integrationConfig = { data: { config: { daily_budget_tokens: 10_000_000 } }, error: null };
+  rpcResponse = { data: 1_014_277, error: null };
+  assert.deepEqual(await enforceCostPolicy("ws_1"), { policy: "allow", reason: "within_budget" });
+
+  reset();
+  integrationConfig = { data: { config: { daily_budget_tokens: 10_000_000 } }, error: null };
+  rpcResponse = { data: 8_000_000, error: null };
+  selectQueue = [{ data: [], error: null }];
+  assert.equal((await enforceCostPolicy("ws_1")).policy, "degrade");
+
+  reset();
+  integrationConfig = { data: { config: { daily_budget_tokens: 10_000_000 } }, error: null };
+  rpcResponse = { data: 10_000_000, error: null };
+  selectQueue = [{ data: [], error: null }];
+  assert.equal((await enforceCostPolicy("ws_1")).policy, "cut");
+});
+
+test("an invalid or unreadable daily_budget_tokens keeps the 1,000,000 default", async () => {
+  for (const cfg of [
+    { data: { config: { daily_budget_tokens: 0 } }, error: null },
+    { data: { config: { daily_budget_tokens: "abc" } }, error: null },
+    { data: null, error: { message: "boom" } },
+  ]) {
+    reset();
+    integrationConfig = cfg;
+    rpcResponse = { data: 1_000_000, error: null };
+    selectQueue = [{ data: [], error: null }];
+    assert.equal((await enforceCostPolicy("ws_1")).policy, "cut");
+  }
+});
 
 test("enforceCostPolicy allows when today's usage is under the warn threshold", async () => {
   reset();
