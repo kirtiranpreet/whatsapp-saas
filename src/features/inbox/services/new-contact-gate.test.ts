@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { isNewContactFromConversations, samePhoneDigits } from "./kapso-history.ts";
-import { parseVerdict } from "./first-message-classifier.ts";
+import { isClearLead, parseVerdict } from "./first-message-classifier.ts";
 import { newContactGate } from "./new-contact-gate.ts";
 
 const NOW = "2026-10-06T18:00:00.000Z";
@@ -76,6 +76,30 @@ test("classifier verdict parsing", () => {
   // Strict: anything that isn't a clear NUEVO stays with the owner.
   assert.equal(parseVerdict("no sé"), "personal");
   assert.equal(parseVerdict(""), "personal");
+});
+
+test("clear leads skip the model (real messages the model missed)", () => {
+  for (const text of [
+    "¡Hola! He completado el formulario y me gustaría recibir más información sobre vuestro negocio.\n\nFull name: X",
+    "Hola buenas estoy interesado,gracias",
+    "Tengo interés",
+    "Hola,  me gustaría saber donde aprender y el coste.  Gracias",
+    "Siempre me pareció interesante el hipnotismo",
+    "Quiero información sobre la formación de Mallorca",
+    "Hola, vi el anuncio",
+  ]) {
+    assert.equal(isClearLead(text), true, text);
+  }
+  for (const text of [
+    "Hola",
+    "Buenos días",
+    "Me puedes pillar la crema esa de los orzuelos porfa",
+    "Has llamado a la chica que te pase ayer?",
+    "Holis, al final vienes ?",
+    "Gracias por comunicarte con Amparo Barres ¿Cómo puedo ayudarte?💙",
+  ]) {
+    assert.equal(isClearLead(text), false, text);
+  }
 });
 
 test("gate: history wins, then the first message, failures stay silent", async () => {
