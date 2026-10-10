@@ -286,6 +286,9 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
             kapsoConversationId: normalized.kapsoConversationId,
             messageTime: normalized.createTime,
             text: normalized.text,
+            strictFirstMessage:
+              (ws.config as { strict_first_message?: boolean })
+                .strict_first_message === true,
           })
         : ({ answer: false, reason: "history_check_failed" } as const);
       if (!verdict.answer) {

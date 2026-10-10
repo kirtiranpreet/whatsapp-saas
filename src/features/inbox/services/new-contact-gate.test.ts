@@ -102,10 +102,39 @@ test("clear leads skip the model (real messages the model missed)", () => {
   }
 });
 
-test("gate: history wins, then the first message, failures stay silent", async () => {
+test("gate (default): every new number is answered, whatever it writes", async () => {
+  const base = {
+    workspaceId: "w", apiKey: "k", phoneNumberId: "p", contactPhone: "34600111222",
+    kapsoConversationId: "c1", messageTime: NOW, text: "info",
+  };
+  let classified = false;
+  const classify = async () => { classified = true; return "personal" as const; };
+  for (const text of ["info", "Hola", "[Multimedia]", null]) {
+    assert.deepEqual(
+      await newContactGate({ ...base, text }, { checkHistory: async () => true, classify }),
+      { answer: true, reason: "new_contact" },
+      String(text),
+    );
+  }
+  assert.equal(classified, false);
+  assert.deepEqual(
+    await newContactGate(base, { checkHistory: async () => false, classify }),
+    { answer: false, reason: "kapso_history" },
+  );
+  assert.deepEqual(
+    await newContactGate(base, {
+      checkHistory: async () => { throw new Error("down"); },
+      classify,
+    }),
+    { answer: false, reason: "history_check_failed" },
+  );
+});
+
+test("gate (strict): history wins, then the first message, failures stay silent", async () => {
   const base = {
     workspaceId: "w", apiKey: "k", phoneNumberId: "p", contactPhone: "34600111222",
     kapsoConversationId: "c1", messageTime: NOW, text: "Hola Antonio, ¿cómo estás?",
+    strictFirstMessage: true,
   };
   assert.deepEqual(
     await newContactGate(base, { checkHistory: async () => false, classify: async () => "prospect" }),

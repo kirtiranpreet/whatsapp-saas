@@ -6,8 +6,10 @@
 //   1. Kapso has no earlier conversation with that number (Kapso stores every
 //      chat of the number since it was connected, including the ones the owner
 //      handles from the phone), and
-//   2. the first message clearly asks about the services (strict: a bare
-//      greeting, media with no text or anything doubtful stays with the owner).
+//   2. only with config.strict_first_message: the first message clearly asks
+//      about the services (a bare greeting, media with no text or anything
+//      doubtful stays with the owner). Without it, every new number is
+//      answered and the agent retires itself if it isn't a prospect.
 // Otherwise the conversation goes to a person (human_active) silently: the
 // owner sees it on the phone as always and the agent never writes in it.
 //
@@ -36,6 +38,11 @@ export interface GateInput {
   messageTime: string;
   /** Text of the first message (caption / transcript-less media gives null) */
   text: string | null;
+  /**
+   * Also require the first message to clearly ask about the services
+   * (config.strict_first_message). Off: every new number is answered.
+   */
+  strictFirstMessage?: boolean;
 }
 
 export interface GateDeps {
@@ -70,8 +77,14 @@ export async function newContactGate(
   }
   if (!isNew) return { answer: false, reason: "kapso_history" };
 
-  // Only a first message that clearly asks about the services is answered. A
-  // photo, audio, contact card or link with no text is left to the owner.
+  // Default: a number that never wrote before is always answered, whatever the
+  // first message ("Hola", "info", a photo…). The agent itself retires with
+  // [[NO_ES_CLIENTE]] if the chat turns out not to be a prospect.
+  if (!input.strictFirstMessage) return { answer: true, reason: "new_contact" };
+
+  // Strict mode (config.strict_first_message): only a first message that
+  // clearly asks about the services is answered. A photo, audio, contact card
+  // or link with no text is left to the owner.
   const text = input.text?.trim();
   if (!text || text === "[Multimedia]") {
     return { answer: false, reason: "personal_message" };
